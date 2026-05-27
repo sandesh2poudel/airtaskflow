@@ -1,0 +1,65 @@
+// ═══════════════════════════════════════════════════════════
+//  FIRESTORE SECURITY RULES  —  paste into Firebase Console
+//  Console → Firestore Database → Rules → Edit rules
+// ═══════════════════════════════════════════════════════════
+//
+//  NOTE: Air Task Flow uses username/password stored in Firestore,
+//  NOT Firebase Authentication. All reads/writes are allowed from
+//  the server side only. Lock down in production using your own
+//  backend API or Firebase Admin SDK if needed.
+//
+//  For a quick start (development), use these permissive rules:
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── Users collection ──────────────────────────────────
+    // Read: anyone (needed for login query)
+    // Write: only via admin (lock this down in production)
+    match /users/{userId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    // ── Leads collection ──────────────────────────────────
+    match /leads/{docId} {
+      allow read, write: if true;
+    }
+
+    // ── Deals collection ──────────────────────────────────
+    match /deals/{docId} {
+      allow read, write: if true;
+    }
+
+    // ── Writer Tasks collection ───────────────────────────
+    match /writer_tasks/{docId} {
+      allow read, write: if true;
+    }
+
+    // ── Audit Log collection ──────────────────────────────
+    match /audit_log/{docId} {
+      allow read, write: if true;
+    }
+
+    // ── Notifications collection ──────────────────────────
+    match /notifications/{docId} {
+      allow read, write: if true;
+    }
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+//  PRODUCTION RULES (use after development is complete)
+//  Tighten these based on your backend setup.
+// ═══════════════════════════════════════════════════════════
+/*
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false; // deny all, use Admin SDK
+    }
+  }
+}
+*/

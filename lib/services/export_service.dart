@@ -167,6 +167,7 @@ class ExportService {
       '#', 'Task Code', 'Date', 'Client', 'Words',
       'Total (AUD)', '1st Pay', '2nd Pay', 'Pay Status',
       'Assign', 'Writer', 'Notes',
+      'Task File Link', 'Pay Screenshot', 'WhatsApp', 'Client Profile',
     ]);
   }
 
@@ -184,6 +185,10 @@ class ExportService {
       TextCellValue(d.assignStatus),
       TextCellValue(d.writerAssigned),
       TextCellValue(d.notes),
+      TextCellValue(d.salesFileLink),        // Task File Link
+      TextCellValue(d.paymentScreenshot),    // Pay Screenshot
+      TextCellValue(d.whatsappNumber),       // WhatsApp
+      TextCellValue(d.clientProfileLink),    // Client Profile
     ]);
   }
 

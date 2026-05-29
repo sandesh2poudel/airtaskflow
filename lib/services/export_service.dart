@@ -191,7 +191,6 @@ class ExportService {
       TextCellValue(d.clientProfileLink),    // Client Profile
     ]);
   }
-
   void _dealsFooter(Sheet sheet, List<DealModel> items) {
     if (items.isEmpty) return;
 
@@ -244,7 +243,7 @@ class ExportService {
 
   void _tasksHeader(Sheet sheet) {
     _hdr(sheet, [
-      '#', 'Task ID', 'Date Assigned', 'Client', 'Subject',
+      '#', 'Task ID','Sales Task ID',  'Date Assigned', 'Client', 'Subject',
       'Type', 'Words', 'Deadline', 'Priority',
       'Sales Person', 'Status', 'File Link',
     ]);
@@ -254,6 +253,7 @@ class ExportService {
     sheet.appendRow([
       TextCellValue('${i + 1}'),
       TextCellValue(t.taskId),
+      TextCellValue(t.salesTaskId),
       TextCellValue(t.dateAssigned),
       TextCellValue(t.clientName),
       TextCellValue(t.subject),

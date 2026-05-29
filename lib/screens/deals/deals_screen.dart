@@ -1647,9 +1647,9 @@ class _AssignDialogState extends State<_AssignDialog> {
       taskId:         '',
       dateAssigned:   DateHelper.today(),
       dealId:         widget.deal.id,
-      salesId:        widget.user.userId,
-      salesName:      widget.user.name,
-      salesTeam:      widget.user.team,  // ← ADD THIS LINE
+      salesId:        widget.deal.salesId,//remove user and add deals add new
+      salesName:      widget.deal.salesName, //remove user and add deals add new
+      salesTeam:      widget.deal.team, //remove user and add deals  add new
       writerId:       _wId,
       writerName:     _wName,
       clientName:     widget.deal.clientName,

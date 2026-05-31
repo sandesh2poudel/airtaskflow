@@ -345,48 +345,13 @@ class _BrandHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     return Column(
       children: [
-        // Logo box with gradient + glow (mirrors HRMS)
-        Container(
-          width: 68,
-          height: 68,
-          decoration: BoxDecoration(
-            gradient: const LinearGradient(
-              colors: [AppColors.accent, AppColors.accent2],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-            borderRadius: BorderRadius.circular(20),
-            boxShadow: [
-              BoxShadow(
-                color: AppColors.accent.withOpacity(0.32),
-                blurRadius: 24,
-                offset: const Offset(0, 10),
-              ),
-            ],
-          ),
-          child: const Center(
-            child: Text(
-              'ATF',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 18,
-                fontWeight: FontWeight.w800,
-                letterSpacing: 1.5,
-              ),
-            ),
-          ),
+        // Logo image instead of ATF box
+        Image.asset(
+          'assets/images/logo.png',
+          width:300,
+          height: 80,
+          fit: BoxFit.contain,
         ),
-        const SizedBox(height: 18),
-        Text(
-          'Air Task Flow',
-          style: TextStyle(
-            fontSize: 28,
-            fontWeight: FontWeight.w800,
-            letterSpacing: -0.8,
-            color: isDark ? AppColors.darkText : AppColors.lightText,
-          ),
-        ),
-        const SizedBox(height: 5),
         Text(
           'Sign in to your workspace',
           textAlign: TextAlign.center,

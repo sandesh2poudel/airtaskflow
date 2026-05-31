@@ -1800,7 +1800,7 @@ class _CommentsDialogState extends State<_CommentsDialog> {
     }
     setState(() { _posting = true; _inputError = ''; });
     final comment = {
-      'author': widget.user.name,
+      'author': widget.user.name,//comment garda you ma username dekinxa
       'role':   widget.user.role,
       'userId': widget.user.userId,
       'text':   text,

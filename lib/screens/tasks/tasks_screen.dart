@@ -1651,7 +1651,7 @@ class _EditTaskDialogState extends State<_EditTaskDialog> {
                     ),
                   ),
 
-                  _field('Sales Task ID (optional)', _salesTaskCtrl, textColor, text2, w: 200),
+                  _field('Sales Task ID *', _salesTaskCtrl, textColor, text2, w: 200),
                   _field('Notes for Writer', _notesCtrl, textColor, text2, w: 580, lines: 3),
                 ]),
               ]),

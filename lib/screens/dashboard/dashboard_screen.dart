@@ -2154,6 +2154,7 @@ class _AmountDef {
   final IconData icon;
   final Color color;
   final LinearGradient gradient;
+
   const _AmountDef({
     required this.label,
     required this.value,

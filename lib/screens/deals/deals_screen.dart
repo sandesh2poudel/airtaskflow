@@ -45,6 +45,7 @@ class _DealsScreenState extends State<DealsScreen> {
 
   static const _colsAdmin = [
     TableCol('Task ID',        130),
+    TableCol('Sales ID',       110),   // ← ADD THIS
     TableCol('Sales Person',   140),
     TableCol('Date',           100),
     TableCol('Client',         140),
@@ -63,6 +64,7 @@ class _DealsScreenState extends State<DealsScreen> {
 
   static const _colsOther = [
     TableCol('Task ID',        130),
+    TableCol('Sales ID',       110),   // ← ADD THIS
     TableCol('Date',           100),
     TableCol('Client',         145),
     TableCol('Words',           80),
@@ -402,6 +404,10 @@ class _DealsScreenState extends State<DealsScreen> {
     cells.add(tCell(
         d.taskCode.isNotEmpty ? d.taskCode : d.id.substring(0, 8),
         color: AppColors.accent, mono: true, fontSize: 11));
+    // ← ADD THIS BLOCK:
+    cells.add(tCell(
+        d.salesTaskId.isEmpty ? '-' : d.salesTaskId,
+        color: AppColors.yellow, mono: true, fontSize: 11));
 
     if (user.isAdmin) {
       cells.add(_salesNameCell(d.salesName, d.salesId, t2c, tc));
@@ -1131,6 +1137,10 @@ class _GroupedDealsTable extends StatelessWidget {
     cells.add(tCell(
         d.taskCode.isNotEmpty ? d.taskCode : d.id.substring(0, 8),
         color: AppColors.accent, mono: true, fontSize: 11));
+    // ← ADD THIS BLOCK:
+    cells.add(tCell(
+        d.salesTaskId.isEmpty ? '-' : d.salesTaskId,
+        color: AppColors.yellow, mono: true, fontSize: 11));
 
     if (user.isAdmin) {
       cells.add(_salesNameCell(d.salesName, d.salesId, t2c, tc));
@@ -1310,6 +1320,7 @@ class _DealDialogState extends State<_DealDialog> {
   final _sc2 = TextEditingController();
   final _pc  = TextEditingController();
   final _wa  = TextEditingController();
+  final _sid = TextEditingController();   // ← ADD THIS
   String _date = DateHelper.today(), _payStatus = 'Pending';
   bool _saving = false;
   String _error = '';
@@ -1329,6 +1340,7 @@ class _DealDialogState extends State<_DealDialog> {
       _sc2.text = d.paymentScreenshot;
       _pc.text  = d.clientProfileLink;
       _wa.text  = d.whatsappNumber;
+      _sid.text = d.salesTaskId;          // ← ADD THIS
       _date      = d.date;
       _payStatus = AppConstants.paymentStatuses.contains(d.paymentStatus)
           ? d.paymentStatus
@@ -1338,15 +1350,15 @@ class _DealDialogState extends State<_DealDialog> {
 
   @override
   void dispose() {
-    for (final c in [_cc, _wc, _tc, _p1, _p2, _nc, _sf, _sc2, _pc, _wa]) {
+    for (final c in [_cc, _wc, _tc, _p1, _p2, _nc, _sf, _sc2, _pc, _wa, _sid]) {
       c.dispose();
     }
     super.dispose();
   }
 
   Future<void> _save() async {
-    if (_cc.text.trim().isEmpty || _tc.text.trim().isEmpty) {
-      setState(() => _error = 'Client name and total value are required');
+    if (_cc.text.trim().isEmpty || _tc.text.trim().isEmpty || _sid.text.trim().isEmpty) {
+      setState(() => _error = 'Client name, total value and Sales Task ID are required');
       return;
     }
     setState(() { _saving = true; _error = ''; });
@@ -1369,6 +1381,7 @@ class _DealDialogState extends State<_DealDialog> {
         paymentScreenshot: _sc2.text.trim(),
         clientProfileLink: _pc.text.trim(),
         whatsappNumber:   _wa.text.trim(),
+        salesTaskId:      _sid.text.trim(),   // ← ADD THIS
       );
       if (widget.deal == null) {
         await widget.svc.addDeal(deal);
@@ -1478,6 +1491,7 @@ class _DealDialogState extends State<_DealDialog> {
                   _f('Client Profile Link', _pc, textColor, text2,
                       w: 290),
                   _f('WhatsApp Number', _wa, textColor, text2),
+                  _f('Sales Task ID *', _sid, textColor, text2, w: 200),  // ← ADD THIS
                   _f('Notes', _nc, textColor, text2, w: 620, lines: 3),
                 ]),
               ]),
@@ -1604,6 +1618,7 @@ class _AssignDialogState extends State<_AssignDialog> {
   void initState() {
     super.initState();
     _subCtrl.text = widget.deal.clientName;
+    _salesIdCtrl.text = widget.deal.salesTaskId; // ← pre-fill from deal new line add for if admin assign task sales id show in admin and employe
     _loadW();
   }
 
@@ -1642,6 +1657,11 @@ class _AssignDialogState extends State<_AssignDialog> {
       setState(() => _error = 'Select a writer');
       return;
     }
+    if (_salesIdCtrl.text.trim().isEmpty) {
+      setState(() => _error = 'Sales Task ID is required');
+      return;
+    }
+
     setState(() { _saving = true; _error = ''; });
     final task = TaskModel(
       taskId:         '',
@@ -1661,6 +1681,7 @@ class _AssignDialogState extends State<_AssignDialog> {
       priority:       _priority,
       notes:          _notesCtrl.text.trim(),
       salesFileLink:  widget.deal.salesFileLink,
+      //  salesTaskId:    _salesIdCtrl.text.trim(), tala add agreko new replace code  admin assign task sales id show in admin and employe
       salesTaskId:    _salesIdCtrl.text.trim(),
     );
     await widget.svc.assignTask(task, widget.deal.id);
@@ -1847,7 +1868,7 @@ class _AssignDialogState extends State<_AssignDialog> {
                           ),
                         ]),
                   ),
-                  _f('Sales Task ID (optional)', _salesIdCtrl,
+                  _f('Sales Task ID *', _salesIdCtrl,
                       tc, t2, w: 200),
                   _f('Notes for Writer', _notesCtrl, tc, t2,
                       w: 510, lines: 3),

@@ -23,6 +23,7 @@ class DealModel {
   final String paymentScreenshot;
   final String clientProfileLink;
   final String whatsappNumber;
+  final String salesTaskId;      // ← ADD THIS
   final DateTime? createdAt;
 
   DealModel({
@@ -46,6 +47,7 @@ class DealModel {
     this.paymentScreenshot = '',
     this.clientProfileLink = '',
     this.whatsappNumber = '',
+    this.salesTaskId = '',       // ← ADD THIS
     this.createdAt,
   });
 
@@ -71,6 +73,7 @@ class DealModel {
       paymentScreenshot: map['paymentScreenshot']?.toString() ?? '',
       clientProfileLink: map['clientProfileLink']?.toString() ?? '',
       whatsappNumber: map['whatsappNumber']?.toString() ?? '',
+      salesTaskId: map['salesTaskId']?.toString() ?? '',   // ← ADD THIS
       createdAt: _parseDateTime(map['createdAt']),
     );
   }
@@ -103,6 +106,7 @@ class DealModel {
       'paymentScreenshot': paymentScreenshot,
       'clientProfileLink': clientProfileLink,
       'whatsappNumber': whatsappNumber,
+      'salesTaskId': salesTaskId,    // ← ADD THIS
       'createdAt': DateTime.now().toIso8601String(),
     };
   }
@@ -130,6 +134,7 @@ class DealModel {
     String? paymentScreenshot,
     String? clientProfileLink,
     String? whatsappNumber,
+    String? salesTaskId,           // ← ADD THIS
   }) {
     return DealModel(
       id: id ?? this.id,
@@ -152,6 +157,7 @@ class DealModel {
       paymentScreenshot: paymentScreenshot ?? this.paymentScreenshot,
       clientProfileLink: clientProfileLink ?? this.clientProfileLink,
       whatsappNumber: whatsappNumber ?? this.whatsappNumber,
+      salesTaskId: salesTaskId ?? this.salesTaskId,   // ← ADD THIS
     );
   }
 }

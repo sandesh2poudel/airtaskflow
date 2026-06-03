@@ -164,7 +164,7 @@ class ExportService {
 
   void _dealsHeader(Sheet sheet) {
     _hdr(sheet, [
-      '#', 'Task Code', 'Date', 'Client', 'Words',
+      '#', 'Task Code', 'Sales ID', 'Date', 'Client', 'Words',
       'Total (AUD)', '1st Pay', '2nd Pay', 'Pay Status',
       'Assign', 'Writer', 'Notes',
       'Task File Link', 'Pay Screenshot', 'WhatsApp', 'Client Profile',
@@ -175,6 +175,7 @@ class ExportService {
     sheet.appendRow([
       TextCellValue('${i + 1}'),
       TextCellValue(d.taskCode),
+      TextCellValue(d.salesTaskId),          // ← ADD THIS
       TextCellValue(d.date),
       TextCellValue(d.clientName),
       TextCellValue(d.wordCount),

@@ -154,6 +154,16 @@ class FirestoreService {
   Future<void> updateDeal(String id, Map<String, dynamic> data) async {
     await _db.collection(AppConstants.colDeals).doc(id).update(data);
   }
+//NEW ADD
+  Future<void> updateTaskByDealId(String dealId, Map<String, dynamic> data) async {
+    final snap = await _db
+        .collection(AppConstants.colTasks)
+        .where('dealId', isEqualTo: dealId)
+        .get();
+    for (final doc in snap.docs) {
+      await doc.reference.update(data);
+    }
+  }
 
   Future<void> deleteDeal(String id) async {
     await _db.collection(AppConstants.colDeals).doc(id).delete();

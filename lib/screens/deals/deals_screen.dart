@@ -451,7 +451,12 @@ class _DealsScreenState extends State<DealsScreen> {
         if (user.isAdmin)
           tAction('Del', AppColors.red,
                   () => _confirmDelete(context, d)),
-        if ((user.isSales || user.isAdmin) && d.assignStatus != 'Assigned')
+    //    if ((user.isSales || user.isAdmin) && d.assignStatus != 'Assigned')
+    //      tAction('Assign', AppColors.green,
+    //              () => _openAssignForm(context, user, d)),
+        if ((user.isSales || user.isAdmin) &&
+            d.assignStatus != 'Assigned' &&
+            d.writerAssigned.isEmpty)
           tAction('Assign', AppColors.green,
                   () => _openAssignForm(context, user, d)),
       ]),
@@ -1182,7 +1187,11 @@ class _GroupedDealsTable extends StatelessWidget {
           tAction('Edit', AppColors.accent, () => onEdit(d)),
         if (user.isAdmin)
           tAction('Del', AppColors.red, () => onDelete(d)),
-        if ((user.isSales || user.isAdmin) && d.assignStatus != 'Assigned')
+   //     if ((user.isSales || user.isAdmin) && d.assignStatus != 'Assigned')
+   //       tAction('Assign', AppColors.green, () => onAssign(d)),
+        if ((user.isSales || user.isAdmin) &&
+            d.assignStatus != 'Assigned' &&
+            d.writerAssigned.isEmpty)
           tAction('Assign', AppColors.green, () => onAssign(d)),
       ]),
     ]);
@@ -1367,9 +1376,13 @@ class _DealDialogState extends State<_DealDialog> {
         id:               widget.deal?.id ?? '',
         taskCode:         widget.deal?.taskCode ?? '',
         date:             _date,
-        salesId:          widget.user.userId,
-        salesName:        widget.user.name,
-        team:             widget.user.team,
+     //   salesId:          widget.user.userId,
+    //    salesName:        widget.user.name,
+    //    team:             widget.user.team,
+        salesId:          widget.deal?.salesId   ?? widget.user.userId, //new add
+        salesName:        widget.deal?.salesName ?? widget.user.name, //new add
+        team:             widget.deal?.team      ?? widget.user.team, // new add
+
         clientName:       _cc.text.trim(),
         wordCount:        _wc.text.trim(),
         totalDealValue:   _tc.text.trim(),
@@ -1383,10 +1396,22 @@ class _DealDialogState extends State<_DealDialog> {
         whatsappNumber:   _wa.text.trim(),
         salesTaskId:      _sid.text.trim(),   // ← ADD THIS
       );
+  //    if (widget.deal == null) {
+  //      await widget.svc.addDeal(deal);
+  //    } else {
+  //      await widget.svc.updateDeal(widget.deal!.id, deal.toMap());
+  //    }
       if (widget.deal == null) {
         await widget.svc.addDeal(deal);
       } else {
         await widget.svc.updateDeal(widget.deal!.id, deal.toMap());
+        await widget.svc.updateTaskByDealId(widget.deal!.id, {
+          'clientName':    _cc.text.trim(),
+          'wordCount':     _wc.text.trim(),
+          'salesFileLink': _sf.text.trim(),
+          'salesTaskId':   _sid.text.trim(),
+          'notes':         _nc.text.trim(),
+        });
       }
       if (mounted) {
         Navigator.pop(context);

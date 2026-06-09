@@ -1466,9 +1466,12 @@ class _LeadDialogState extends State<_LeadDialog> {
       final l = LeadModel(
           id:                widget.lead?.id ?? '',
           date:              _date,
-          salesId:           widget.user.userId,
-          salesName:         widget.user.name,
-          team:              widget.user.team,
+        //  salesId:           widget.user.userId,
+       //   salesName:         widget.user.name,
+       //   team:              widget.user.team,
+          salesId:           widget.lead?.salesId   ?? widget.user.userId, //new add replace
+          salesName:         widget.lead?.salesName ?? widget.user.name, //new add replace
+          team:              widget.lead?.team      ?? widget.user.team,  //new add replace
           clientName:        _cc.text.trim(),
           dealClosingStatus: _status,
           subjectsTask:      _sc.text.trim(),

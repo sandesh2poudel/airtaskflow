@@ -203,14 +203,24 @@ class FirestoreService {
 
   // ← CHANGED: now saves salesTeam onto the task document
   Future<String> assignTask(TaskModel task, String dealId) async {
-    final data = task.toMap(); // salesTeam is now included in toMap()
+    // Delete any existing task for this deal first
+    final existing = await _db
+        .collection(AppConstants.colTasks)
+        .where('dealId', isEqualTo: dealId)
+        .get();
+    for (final doc in existing.docs) {
+      await doc.reference.delete();
+    }
+
+    // Create the new task
+    final data = task.toMap();
     data['createdAt'] = DateTime.now().toIso8601String();
     final doc = await _db.collection(AppConstants.colTasks).add(data);
 
     await _db.collection(AppConstants.colDeals).doc(dealId).update({
-      'assignStatus': 'Assigned',
+      'assignStatus':   'Assigned',
       'writerAssigned': task.writerName,
-      'writerTaskId': doc.id,
+      'writerTaskId':   doc.id,
     });
 
     await _logAudit(task.salesName, task.salesId,

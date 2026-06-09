@@ -1468,6 +1468,13 @@ class _EditTaskDialogState extends State<_EditTaskDialog> {
         'notes':          _notesCtrl.text.trim(),
         'salesTaskId':    _salesTaskCtrl.text.trim(),
       });
+      // Sync word count back to Deals Closed add this if code ok
+      if (widget.task.dealId.isNotEmpty) {
+        await widget.svc.updateDeal(widget.task.dealId, {
+          'wordCount': _wordsCtrl.text.trim(),
+          'writerAssigned': _writerName,
+        });
+      }
       if (mounted) {
         Navigator.pop(context);
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(

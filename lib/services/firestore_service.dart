@@ -79,19 +79,12 @@ class FirestoreService {
       query = query.where('salesId', isEqualTo: user.userId);
     }
 
-    return query.snapshots().map((snap) {
-      final list = snap.docs
-          .map((d) => LeadModel.fromMap(d.data(), d.id))
-          .toList();
-      list.sort((a, b) {
-        final da = a.createdAt?.millisecondsSinceEpoch ??
-            (DateTime.tryParse(a.date)?.millisecondsSinceEpoch ?? 0);
-        final db2 = b.createdAt?.millisecondsSinceEpoch ??
-            (DateTime.tryParse(b.date)?.millisecondsSinceEpoch ?? 0);
-        return db2.compareTo(da);
-      });
-      return list;
-    });
+    return query
+        .orderBy('createdAt', descending: true)
+        .snapshots()
+        .map((snap) => snap.docs
+        .map((d) => LeadModel.fromMap(d.data(), d.id))
+        .toList());
   }
 
   Future<String> addLead(LeadModel lead) async {
@@ -125,19 +118,12 @@ class FirestoreService {
       query = query.where('team', isEqualTo: user.team);
     }
 
-    return query.snapshots().map((snap) {
-      final list = snap.docs
-          .map((d) => DealModel.fromMap(d.data(), d.id))
-          .toList();
-      list.sort((a, b) {
-        final da = a.createdAt?.millisecondsSinceEpoch ??
-            (DateTime.tryParse(a.date)?.millisecondsSinceEpoch ?? 0);
-        final db2 = b.createdAt?.millisecondsSinceEpoch ??
-            (DateTime.tryParse(b.date)?.millisecondsSinceEpoch ?? 0);
-        return db2.compareTo(da);
-      });
-      return list;
-    });
+    return query
+        .orderBy('createdAt', descending: true)
+        .snapshots()
+        .map((snap) => snap.docs
+        .map((d) => DealModel.fromMap(d.data(), d.id))
+        .toList());
   }
 
   Future<String> addDeal(DealModel deal) async {
@@ -154,7 +140,7 @@ class FirestoreService {
   Future<void> updateDeal(String id, Map<String, dynamic> data) async {
     await _db.collection(AppConstants.colDeals).doc(id).update(data);
   }
-//NEW ADD
+
   Future<void> updateTaskByDealId(String dealId, Map<String, dynamic> data) async {
     final snap = await _db
         .collection(AppConstants.colTasks)
@@ -174,7 +160,6 @@ class FirestoreService {
   // TASKS
   // ══════════════════════════════════════════
 
-  // ← CHANGED: team leader now only sees tasks from their team's sales people
   Stream<List<TaskModel>> tasksStream(UserModel user) {
     Query<Map<String, dynamic>> query = _db.collection(AppConstants.colTasks);
 
@@ -183,27 +168,18 @@ class FirestoreService {
     } else if (user.isSales) {
       query = query.where('salesId', isEqualTo: user.userId);
     } else if (user.isTeamLeader && user.team.isNotEmpty) {
-      // Team leader only sees tasks where salesTeam matches their team
       query = query.where('salesTeam', isEqualTo: user.team);
     }
-    // Admin: no filter → sees all tasks
 
-    return query.snapshots().map((snap) {
-      final list = snap.docs
-          .map((d) => TaskModel.fromMap(d.data(), d.id))
-          .toList();
-      list.sort((a, b) {
-        final da = DateTime.tryParse(a.dateAssigned)?.millisecondsSinceEpoch ?? 0;
-        final db2 = DateTime.tryParse(b.dateAssigned)?.millisecondsSinceEpoch ?? 0;
-        return db2.compareTo(da);
-      });
-      return list;
-    });
+    return query
+        .orderBy('dateAssigned', descending: true)
+        .snapshots()
+        .map((snap) => snap.docs
+        .map((d) => TaskModel.fromMap(d.data(), d.id))
+        .toList());
   }
 
-  // ← CHANGED: now saves salesTeam onto the task document
   Future<String> assignTask(TaskModel task, String dealId) async {
-    // Delete any existing task for this deal first
     final existing = await _db
         .collection(AppConstants.colTasks)
         .where('dealId', isEqualTo: dealId)
@@ -212,7 +188,6 @@ class FirestoreService {
       await doc.reference.delete();
     }
 
-    // Create the new task
     final data = task.toMap();
     data['createdAt'] = DateTime.now().toIso8601String();
     final doc = await _db.collection(AppConstants.colTasks).add(data);
@@ -368,7 +343,6 @@ class FirestoreService {
       } else if (user.isWriter) {
         tasksQ = tasksQ.where('writerId', isEqualTo: user.userId);
       } else if (user.isTeamLeader && user.team.isNotEmpty) {
-        // ← CHANGED: dashboard stats also respect team filter
         tasksQ = tasksQ.where('salesTeam', isEqualTo: user.team);
       }
       final tSnap = await tasksQ.get();

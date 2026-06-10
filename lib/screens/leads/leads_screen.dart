@@ -629,7 +629,7 @@ class _LeadsScreenState extends State<LeadsScreen> {
     }
     cells.add(tCell(l.source, color: text2, fontSize: 12));
     cells.add(tCell(l.subjectsTask, color: textColor, fontSize: 12));
-    l.remarks.isEmpty ? tCell('-', color: text2) : _remarksCell(l.remarks, text2);
+    cells.add(l.remarks.isEmpty ? tCell('-', color: text2) : _remarksCell(l.remarks, text2));
     cells.add(tCell(l.followupTextCall, color: text2, fontSize: 12));
     cells.add(tCell(l.whatsappNumber, fontSize: 11, mono: true));
     cells.add(tActions([

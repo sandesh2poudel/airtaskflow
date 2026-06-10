@@ -437,7 +437,37 @@ class _DealsScreenState extends State<DealsScreen> {
           child: StatusBadge.forAssign(d.assignStatus)),
       tCell(d.writerAssigned.isEmpty ? '-' : d.writerAssigned,
           color: t2c, fontSize: 12),
-      tCell(d.notes.isEmpty ? '-' : d.notes, color: t2c, fontSize: 12),
+      d.notes.isEmpty
+          ? tCell('-', color: t2c)
+          : Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+        child: Tooltip(
+          message: d.notes,
+          preferBelow: true,
+          textStyle: const TextStyle(fontSize: 12, color: Colors.white),
+          decoration: BoxDecoration(
+            color: const Color(0xFF1E1E2E),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: AppColors.accent.withOpacity(0.3)),
+          ),
+          padding: const EdgeInsets.all(10),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Flexible(
+                child: Text(
+                  d.notes,
+                  overflow: TextOverflow.ellipsis,
+                  maxLines: 1,
+                  style: TextStyle(fontSize: 12, color: t2c),
+                ),
+              ),
+              const SizedBox(width: 4),
+              Icon(Icons.info_outline, size: 12, color: t2c),
+            ],
+          ),
+        ),
+      ),
       d.salesFileLink.isNotEmpty
           ? _urlBtn('📁 File', d.salesFileLink)
           : tCell('-', color: t2c),
@@ -451,9 +481,9 @@ class _DealsScreenState extends State<DealsScreen> {
         if (user.isAdmin)
           tAction('Del', AppColors.red,
                   () => _confirmDelete(context, d)),
-    //    if ((user.isSales || user.isAdmin) && d.assignStatus != 'Assigned')
-    //      tAction('Assign', AppColors.green,
-    //              () => _openAssignForm(context, user, d)),
+        //    if ((user.isSales || user.isAdmin) && d.assignStatus != 'Assigned')
+        //      tAction('Assign', AppColors.green,
+        //              () => _openAssignForm(context, user, d)),
         if ((user.isSales || user.isAdmin) &&
             d.assignStatus != 'Assigned' &&
             d.writerAssigned.isEmpty)
@@ -767,7 +797,37 @@ class _DealsScreenState extends State<DealsScreen> {
         contentPadding: const EdgeInsets.symmetric(vertical: 8),
         isDense: true,
       );
-
+  Widget _notesCell(String notes, Color t2c) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+      child: Tooltip(
+        message: notes,
+        preferBelow: true,
+        textStyle: const TextStyle(fontSize: 12, color: Colors.white),
+        decoration: BoxDecoration(
+          color: const Color(0xFF1E1E2E),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: AppColors.accent.withOpacity(0.3)),
+        ),
+        padding: const EdgeInsets.all(10),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Flexible(
+              child: Text(
+                notes,
+                overflow: TextOverflow.ellipsis,
+                maxLines: 1,
+                style: TextStyle(fontSize: 12, color: t2c),
+              ),
+            ),
+            const SizedBox(width: 4),
+            Icon(Icons.info_outline, size: 12, color: t2c),
+          ],
+        ),
+      ),
+    );
+  }
   void _openDealForm(
       BuildContext context, UserModel user, DealModel? deal) {
     showDialog(
@@ -1175,7 +1235,37 @@ class _GroupedDealsTable extends StatelessWidget {
           child: StatusBadge.forAssign(d.assignStatus)),
       tCell(d.writerAssigned.isEmpty ? '-' : d.writerAssigned,
           color: t2c, fontSize: 12),
-      tCell(d.notes.isEmpty ? '-' : d.notes, color: t2c, fontSize: 12),
+      d.notes.isEmpty
+          ? tCell('-', color: t2c)
+          : Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+        child: Tooltip(
+          message: d.notes,
+          preferBelow: true,
+          textStyle: const TextStyle(fontSize: 12, color: Colors.white),
+          decoration: BoxDecoration(
+            color: const Color(0xFF1E1E2E),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: AppColors.accent.withOpacity(0.3)),
+          ),
+          padding: const EdgeInsets.all(10),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Flexible(
+                child: Text(
+                  d.notes,
+                  overflow: TextOverflow.ellipsis,
+                  maxLines: 1,
+                  style: TextStyle(fontSize: 12, color: t2c),
+                ),
+              ),
+              const SizedBox(width: 4),
+              Icon(Icons.info_outline, size: 12, color: t2c),
+            ],
+          ),
+        ),
+      ),
       d.salesFileLink.isNotEmpty
           ? _urlBtn('📁 File', d.salesFileLink)
           : tCell('-', color: t2c),
@@ -1187,8 +1277,8 @@ class _GroupedDealsTable extends StatelessWidget {
           tAction('Edit', AppColors.accent, () => onEdit(d)),
         if (user.isAdmin)
           tAction('Del', AppColors.red, () => onDelete(d)),
-   //     if ((user.isSales || user.isAdmin) && d.assignStatus != 'Assigned')
-   //       tAction('Assign', AppColors.green, () => onAssign(d)),
+        //     if ((user.isSales || user.isAdmin) && d.assignStatus != 'Assigned')
+        //       tAction('Assign', AppColors.green, () => onAssign(d)),
         if ((user.isSales || user.isAdmin) &&
             d.assignStatus != 'Assigned' &&
             d.writerAssigned.isEmpty)
@@ -1376,9 +1466,9 @@ class _DealDialogState extends State<_DealDialog> {
         id:               widget.deal?.id ?? '',
         taskCode:         widget.deal?.taskCode ?? '',
         date:             _date,
-     //   salesId:          widget.user.userId,
-    //    salesName:        widget.user.name,
-    //    team:             widget.user.team,
+        //   salesId:          widget.user.userId,
+        //    salesName:        widget.user.name,
+        //    team:             widget.user.team,
         salesId:          widget.deal?.salesId   ?? widget.user.userId, //new add
         salesName:        widget.deal?.salesName ?? widget.user.name, //new add
         team:             widget.deal?.team      ?? widget.user.team, // new add
@@ -1396,15 +1486,19 @@ class _DealDialogState extends State<_DealDialog> {
         whatsappNumber:   _wa.text.trim(),
         salesTaskId:      _sid.text.trim(),   // ← ADD THIS
       );
-  //    if (widget.deal == null) {
-  //      await widget.svc.addDeal(deal);
-  //    } else {
-  //      await widget.svc.updateDeal(widget.deal!.id, deal.toMap());
-  //    }
+      //    if (widget.deal == null) {
+      //      await widget.svc.addDeal(deal);
+      //    } else {
+      //      await widget.svc.updateDeal(widget.deal!.id, deal.toMap());
+      //    }
       if (widget.deal == null) {
         await widget.svc.addDeal(deal);
       } else {
-        await widget.svc.updateDeal(widget.deal!.id, deal.toMap());
+        final updateData = deal.toMap();
+        updateData.remove('assignStatus');
+        updateData.remove('writerAssigned');
+        updateData.remove('writerTaskId');
+        await widget.svc.updateDeal(widget.deal!.id, updateData);
         await widget.svc.updateTaskByDealId(widget.deal!.id, {
           'clientName':    _cc.text.trim(),
           'wordCount':     _wc.text.trim(),
@@ -1642,7 +1736,8 @@ class _AssignDialogState extends State<_AssignDialog> {
   @override
   void initState() {
     super.initState();
-    _subCtrl.text = widget.deal.clientName;
+    //   _subCtrl.text = widget.deal.clientName;
+    _subCtrl.text = '';
     _salesIdCtrl.text = widget.deal.salesTaskId; // ← pre-fill from deal new line add for if admin assign task sales id show in admin and employe
     _loadW();
   }

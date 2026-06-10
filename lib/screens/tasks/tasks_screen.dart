@@ -1473,6 +1473,7 @@ class _EditTaskDialogState extends State<_EditTaskDialog> {
         await widget.svc.updateDeal(widget.task.dealId, {
           'wordCount': _wordsCtrl.text.trim(),
           'writerAssigned': _writerName,
+          'salesTaskId':    _salesTaskCtrl.text.trim(),
         });
       }
       if (mounted) {

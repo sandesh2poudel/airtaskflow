@@ -629,7 +629,7 @@ class _LeadsScreenState extends State<LeadsScreen> {
     }
     cells.add(tCell(l.source, color: text2, fontSize: 12));
     cells.add(tCell(l.subjectsTask, color: textColor, fontSize: 12));
-    cells.add(tCell(l.remarks, color: text2, fontSize: 12, maxLines: 2));
+    l.remarks.isEmpty ? tCell('-', color: text2) : _remarksCell(l.remarks, text2);
     cells.add(tCell(l.followupTextCall, color: text2, fontSize: 12));
     cells.add(tCell(l.whatsappNumber, fontSize: 11, mono: true));
     cells.add(tActions([
@@ -984,6 +984,37 @@ class _LeadsScreenState extends State<LeadsScreen> {
                   color: textColor)),
         ),
       ]),
+    );
+  }
+  Widget _remarksCell(String remarks, Color t2c) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+      child: Tooltip(
+        message: remarks,
+        preferBelow: true,
+        textStyle: const TextStyle(fontSize: 12, color: Colors.white),
+        decoration: BoxDecoration(
+          color: const Color(0xFF1E1E2E),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: AppColors.accent.withOpacity(0.3)),
+        ),
+        padding: const EdgeInsets.all(10),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Flexible(
+              child: Text(
+                remarks,
+                overflow: TextOverflow.ellipsis,
+                maxLines: 1,
+                style: TextStyle(fontSize: 12, color: t2c),
+              ),
+            ),
+            const SizedBox(width: 4),
+            Icon(Icons.info_outline, size: 12, color: t2c),
+          ],
+        ),
+      ),
     );
   }
 
@@ -1344,7 +1375,7 @@ class _GroupedTable extends StatelessWidget {
     }
     cells.add(tCell(l.source, color: text2, fontSize: 12));
     cells.add(tCell(l.subjectsTask, color: textColor, fontSize: 12));
-    cells.add(tCell(l.remarks, color: text2, fontSize: 12, maxLines: 2));
+    cells.add(l.remarks.isEmpty ? tCell('-', color: text2) : _remarksCell(l.remarks, text2));
     cells.add(tCell(l.followupTextCall, color: text2, fontSize: 12));
     cells.add(tCell(l.whatsappNumber, fontSize: 11, mono: true));
     cells.add(tActions([
@@ -1355,7 +1386,37 @@ class _GroupedTable extends StatelessWidget {
     ]));
     return cells;
   }
-
+  Widget _remarksCell(String remarks, Color t2c) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+      child: Tooltip(
+        message: remarks,
+        preferBelow: true,
+        textStyle: const TextStyle(fontSize: 12, color: Colors.white),
+        decoration: BoxDecoration(
+          color: const Color(0xFF1E1E2E),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: AppColors.accent.withOpacity(0.3)),
+        ),
+        padding: const EdgeInsets.all(10),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Flexible(
+              child: Text(
+                remarks,
+                overflow: TextOverflow.ellipsis,
+                maxLines: 1,
+                style: TextStyle(fontSize: 12, color: t2c),
+              ),
+            ),
+            const SizedBox(width: 4),
+            Icon(Icons.info_outline, size: 12, color: t2c),
+          ],
+        ),
+      ),
+    );
+  }
   Widget _salesNameCell(String name) {
     final initials = name
         .split(' ')
@@ -1466,9 +1527,9 @@ class _LeadDialogState extends State<_LeadDialog> {
       final l = LeadModel(
           id:                widget.lead?.id ?? '',
           date:              _date,
-        //  salesId:           widget.user.userId,
-       //   salesName:         widget.user.name,
-       //   team:              widget.user.team,
+          //  salesId:           widget.user.userId,
+          //   salesName:         widget.user.name,
+          //   team:              widget.user.team,
           salesId:           widget.lead?.salesId   ?? widget.user.userId, //new add replace
           salesName:         widget.lead?.salesName ?? widget.user.name, //new add replace
           team:              widget.lead?.team      ?? widget.user.team,  //new add replace

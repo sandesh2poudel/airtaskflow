@@ -1,4 +1,5 @@
 // lib/screens/tasks/tasks_screen.dart
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
 import 'package:provider/provider.dart';
@@ -10,6 +11,7 @@ import '../../models/task_model.dart';
 import '../../models/user_model.dart';
 import '../../providers/auth_provider.dart';
 import '../../services/firestore_service.dart';
+import '../../widgets/pagination_bar.dart';
 import '../../widgets/sticky_table.dart';
 import '../../widgets/status_badge.dart';
 
@@ -23,16 +25,12 @@ class TasksScreen extends StatefulWidget {
 class _TasksScreenState extends State<TasksScreen> {
   final _svc        = FirestoreService();
   final _searchCtrl = TextEditingController();
-  // Cached stream — created ONCE in initState so setState never
-  // re-subscribes and causes the double-loading flash.
-  late Stream<List<TaskModel>> _tasksStream;
+
   String _searchQuery  = '';
   String _filterMonth  = _currentMonthKey();
   String _filterStatus = 'All';
   String _quickDate    = '';
 
-  /// Returns 'YYYY-MM' for the current month, e.g. '2026-05'.
-  /// Screen auto-filters to this on first load; resets here on Clear All.
   static String _currentMonthKey() {
     final now = DateTime.now();
     final m   = now.month.toString().padLeft(2, '0');
@@ -44,8 +42,18 @@ class _TasksScreenState extends State<TasksScreen> {
   List<UserModel> _salesUsers = [];
 
   // ── Group by status ──────────────────────────────────────────
-  bool _groupByStatus = true;
+  bool _groupByStatus = false;
   final Set<String> _collapsed = {};
+
+  // ── PAGINATION STATE ─────────────────────────────────────────
+  List<TaskModel> _tasks      = [];
+  bool   _loading             = true;
+  int    _currentPage         = 1;
+  bool   _hasMore             = false;
+  final List<DocumentSnapshot?> _cursorStack = [null];
+
+  // Stream for summary bar ONLY (lightweight, always real-time)
+//  late Stream<List<TaskModel>> _tasksStream;
 
   // ── Column definitions ────────────────────────────────────────
   static const _cols = [
@@ -68,13 +76,13 @@ class _TasksScreenState extends State<TasksScreen> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    // Initialize stream here (not initState) so context is fully ready.
-    // Guard ensures we only create it once, not on every dependency change.
     if (!_streamInitialized) {
       _streamInitialized = true;
       final user = context.read<AuthProvider>().currentUser!;
-      _tasksStream = _svc.tasksStream(user);
+      // Stream is used ONLY for the summary bar — stays lightweight
+ //     _tasksStream = _svc.tasksStream(user);
       WidgetsBinding.instance.addPostFrameCallback((_) => _loadSalesUsers());
+      _fetchPage(); // load first page
     }
   }
 
@@ -88,8 +96,6 @@ class _TasksScreenState extends State<TasksScreen> {
     if (!user.isAdmin) return;
     final all = await _svc.getAllUsers();
     if (!mounted) return;
-    // Use a microtask so the setState is batched and never causes
-    // the StreamBuilder to restart its stream subscription.
     Future.microtask(() {
       if (mounted) {
         setState(() {
@@ -103,6 +109,55 @@ class _TasksScreenState extends State<TasksScreen> {
   void dispose() {
     _searchCtrl.dispose();
     super.dispose();
+  }
+
+  // ── Pagination ────────────────────────────────────────────────
+  Future<void> _fetchPage() async {
+    if (!mounted) return;
+    setState(() => _loading = true);
+
+    final user   = context.read<AuthProvider>().currentUser!;
+    final cursor = _cursorStack[_currentPage - 1];
+
+    // Month filter applied client-side in service — no composite index needed
+    final result = await _svc.getTasksPaginated(
+      user: user,
+      filterMonth: _quickDate.isEmpty ? _filterMonth : '',
+      startAfter: cursor,
+      // ADD THIS LINE ↓
+      pageIndex: _currentPage - 1, // add this one
+    );
+
+    if (!mounted) return;
+
+    if (_cursorStack.length <= _currentPage) {
+      _cursorStack.add(result.lastDoc);
+    }
+
+    setState(() {
+      _tasks   = result.items;
+      _hasMore = result.hasMore;
+      _loading = false;
+    });
+  }
+
+  void _goNextPage() {
+    setState(() => _currentPage++);
+    _fetchPage();
+  }
+
+  void _goPrevPage() {
+    if (_currentPage <= 1) return;
+    setState(() => _currentPage--);
+    _fetchPage();
+  }
+
+  void _resetPagination() {
+    _currentPage = 1;
+    _cursorStack
+      ..clear()
+      ..add(null);
+    _fetchPage();
   }
 
   // ── Quick date helper ─────────────────────────────────────────
@@ -135,22 +190,26 @@ class _TasksScreenState extends State<TasksScreen> {
   }
 
   bool get _hasActiveFilters =>
-      _filterMonth != _currentMonthKey() ||  // only "active" if user changed from default
+      _filterMonth != _currentMonthKey() ||
           _filterStatus != 'All' ||
           _quickDate.isNotEmpty ||
           _filterSalesId != 'all' ||
           _searchQuery.isNotEmpty;
 
-  void _clearAllFilters() => setState(() {
-    _filterMonth   = _currentMonthKey(); // reset to current month, not all-time
-    _filterStatus  = 'All';
-    _quickDate     = '';
-    _filterSalesId = 'all';
-    _searchQuery   = '';
-    _searchCtrl.clear();
-  });
+  void _clearAllFilters() {
+    setState(() {
+      _filterMonth   = _currentMonthKey();
+      _filterStatus  = 'All';
+      _quickDate     = '';
+      _filterSalesId = 'all';
+      _searchQuery   = '';
+      _searchCtrl.clear();
+    });
+    _resetPagination();
+  }
 
-  // ── Apply filters ─────────────────────────────────────────────
+  // ── Apply client-side filters ─────────────────────────────────
+  // Month is already applied by Firestore (unless quickDate is active)
   List<TaskModel> _applyFilters(List<TaskModel> tasks, UserModel user) {
     var filtered = tasks;
 
@@ -160,8 +219,6 @@ class _TasksScreenState extends State<TasksScreen> {
 
     if (_quickDate.isNotEmpty) {
       filtered = filtered.where((t) => _matchesQuickDate(t.dateAssigned)).toList();
-    } else if (_filterMonth.isNotEmpty) {
-      filtered = filtered.where((t) => t.dateAssigned.startsWith(_filterMonth)).toList();
     }
 
     if (_filterStatus != 'All') {
@@ -223,14 +280,19 @@ class _TasksScreenState extends State<TasksScreen> {
                   : _buildHeaderDesktop(context, user, surface, border, textColor, text2, title, subtitle),
             ),
 
-            // ── Summary bar ───────────────────────────────────────
-            StreamBuilder<List<TaskModel>>(
+            // ── Summary bar (from stream — always real-time) ───────
+      /**      StreamBuilder<List<TaskModel>>(
               stream: _tasksStream,
               builder: (ctx, snap) {
                 final all = snap.data ?? [];
                 final filtered = _applyFilters(all, user);
                 return _TaskSummaryBar(tasks: filtered, bg: bg, text2: text2);
               },
+          ),      */
+            _TaskSummaryBar(
+              tasks: _applyFilters(_tasks, user),
+              bg: bg,
+              text2: text2,
             ),
 
             // ── Search bar ────────────────────────────────────────
@@ -260,7 +322,7 @@ class _TasksScreenState extends State<TasksScreen> {
             // ── Table ─────────────────────────────────────────────
             Expanded(
               child: Container(
-                margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                margin: const EdgeInsets.fromLTRB(16, 0, 16, 0),
                 decoration: BoxDecoration(
                   color: surface,
                   borderRadius: BorderRadius.circular(12),
@@ -271,76 +333,87 @@ class _TasksScreenState extends State<TasksScreen> {
                       offset: const Offset(0, 2))],
                 ),
                 clipBehavior: Clip.antiAlias,
-                child: StreamBuilder<List<TaskModel>>(
-                  stream: _tasksStream,
-                  builder: (ctx, snap) {
-                    if (snap.connectionState == ConnectionState.waiting) {
-                      return const Center(child: CircularProgressIndicator());
-                    }
-                    if (snap.hasError) {
-                      return Center(child: Text('Error: ${snap.error}',
-                          style: const TextStyle(color: AppColors.red)));
-                    }
+                child: Column(
+                  children: [
+                    Expanded(child: _buildTable(user, isDark, textColor, text2, surface, border)),
 
-                    final all   = snap.data ?? [];
-                    final tasks = _applyFilters(all, user);
-
-                    if (_groupByStatus) {
-                      return _GroupedTaskTable(
-                        tasks:       tasks,
-                        cols:        _cols,
-                        user:        user,
-                        isDark:      isDark,
-                        collapsed:   _collapsed,
-                        surface:     surface,
-                        border:      border,
-                        textColor:   textColor,
-                        text2:       text2,
-                        onToggle:    (s) => setState(() {
-                          _collapsed.contains(s)
-                              ? _collapsed.remove(s)
-                              : _collapsed.add(s);
-                        }),
-                        onEdit:      (t) => _openEditTaskDialog(context, t, user),
-                        onDelete:    (t) => _confirmDelete(context, t),
-                        onSubmit:    (t) => _openSubmitDialog(context, t),
-                        onEditFile:  (t) => _openEditFileDialog(context, t),
-                        onDoAction:  (t, a) => _doAction(context, t, a),
-                        onComment:   (t) => _openCommentsDialog(context, t, user),
-                        onOpenUrl:   _openUrl,
-                        emptySubMsg: _hasActiveFilters
-                            ? 'Try clearing some filters'
-                            : 'Tasks appear after deals are assigned to writers',
-                      );
-                    }
-
-                    // Flat table
-                    return _FlatTaskTable(
-                      tasks:      tasks,
-                      cols:       _cols,
-                      user:       user,
-                      isDark:     isDark,
-                      border:     border,
-                      textColor:  textColor,
-                      text2:      text2,
-                      onEdit:     (t) => _openEditTaskDialog(context, t, user),
-                      onDelete:   (t) => _confirmDelete(context, t),
-                      onSubmit:   (t) => _openSubmitDialog(context, t),
-                      onEditFile: (t) => _openEditFileDialog(context, t),
-                      onDoAction: (t, a) => _doAction(context, t, a),
-                      onComment:  (t) => _openCommentsDialog(context, t, user),
-                      onOpenUrl:  _openUrl,
-                      emptySubMsg: _hasActiveFilters
-                          ? 'Try clearing some filters'
-                          : 'Tasks appear after deals are assigned to writers',
-                    );
-                  },
+                    // ── Pagination bar ──────────────────────────
+                    PaginationBar(
+                      currentPage: _currentPage,
+                      hasMore: _hasMore,
+                      isLoading: _loading,
+                      onPrev: _currentPage > 1 ? _goPrevPage : null,
+                      onNext: _goNextPage,
+                    ),
+                  ],
                 ),
               ),
             ),
+
+            const SizedBox(height: 16),
           ],
         );
       },
+    );
+  }
+
+  Widget _buildTable(
+      UserModel user, bool isDark, Color textColor, Color text2,
+      Color surface, Color border) {
+    if (_loading) {
+      return const Center(child: CircularProgressIndicator(color: AppColors.accent));
+    }
+
+    final tasks = _applyFilters(_tasks, user);
+
+    if (_groupByStatus) {
+      return _GroupedTaskTable(
+        tasks:       tasks,
+        cols:        _cols,
+        user:        user,
+        isDark:      isDark,
+        collapsed:   _collapsed,
+        surface:     surface,
+        border:      border,
+        textColor:   textColor,
+        text2:       text2,
+        onToggle:    (s) => setState(() {
+          _collapsed.contains(s)
+              ? _collapsed.remove(s)
+              : _collapsed.add(s);
+        }),
+        onEdit:      (t) => _openEditTaskDialog(context, t, user),
+        onDelete:    (t) => _confirmDelete(context, t),
+        onSubmit:    (t) => _openSubmitDialog(context, t),
+        onEditFile:  (t) => _openEditFileDialog(context, t),
+        onDoAction:  (t, a) => _doAction(context, t, a),
+        onComment:   (t) => _openCommentsDialog(context, t, user),
+        onOpenUrl:   _openUrl,
+        emptySubMsg: _hasActiveFilters
+            ? 'Try clearing some filters'
+            : 'Tasks appear after deals are assigned to writers',
+      );
+    }
+
+    // Flat table
+    return _FlatTaskTable(
+      tasks:      tasks,
+      cols:       _cols,
+      user:       user,
+      isDark:     isDark,
+      border:     border,
+      textColor:  textColor,
+      text2:      text2,
+      onEdit:     (t) => _openEditTaskDialog(context, t, user),
+      onDelete:   (t) => _confirmDelete(context, t),
+      onSubmit:   (t) => _openSubmitDialog(context, t),
+      onEditFile: (t) => _openEditFileDialog(context, t),
+      onDoAction: (t, a) => _doAction(context, t, a),
+      onComment:  (t) => _openCommentsDialog(context, t, user),
+      onOpenUrl:  _openUrl,
+      emptySubMsg: _hasActiveFilters
+          ? 'Try clearing some filters'
+          : 'Tasks appear after deals are assigned to writers',
     );
   }
 
@@ -727,11 +800,23 @@ class _TasksScreenState extends State<TasksScreen> {
       );
 
   // ── Dialogs ───────────────────────────────────────────────────
-  void _openEditTaskDialog(BuildContext context, TaskModel task, UserModel currentUser) {
+  void _openEditTaskDialog(BuildContext context, TaskModel task,
+      UserModel currentUser) {
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (_) => _EditTaskDialog(task: task, currentUser: currentUser, svc: _svc),
+      builder: (_) => _EditTaskDialog(
+        task: task,
+        currentUser: currentUser,
+        svc: _svc,
+        onSaved: (updatedTask) {
+          setState(() {
+            final idx = _tasks.indexWhere(
+                    (t) => t.taskId == updatedTask.taskId);
+            if (idx != -1) _tasks[idx] = updatedTask;
+          });
+        },
+      ),
     );
   }
 
@@ -761,9 +846,21 @@ class _TasksScreenState extends State<TasksScreen> {
           ElevatedButton(
             onPressed: () async {
               if (ctrl.text.trim().isEmpty) return;
-              await _svc.submitTaskCompletion(task.taskId, ctrl.text.trim());
+              final fileLink = ctrl.text.trim();
+              await _svc.submitTaskCompletion(task.taskId, fileLink);
               if (ctx.mounted) {
                 Navigator.pop(ctx);
+                setState(() {
+                  final idx = _tasks.indexWhere(
+                          (t) => t.taskId == task.taskId);
+                  if (idx != -1) {
+                    _tasks[idx] = _tasks[idx].copyWith(
+                      status:        'Completed',
+                      fileLink:      fileLink,
+                      completedDate: DateTime.now().toIso8601String(),
+                    );
+                  }
+                });
                 ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
                   content: Text('✅ Task submitted! Team leader will review.'),
                   backgroundColor: AppColors.green,
@@ -787,16 +884,32 @@ class _TasksScreenState extends State<TasksScreen> {
         backgroundColor: isDark ? AppColors.darkSurface : AppColors.lightSurface,
         title: const Text('Update File Link'),
         content: TextField(controller: ctrl,
-            decoration: const InputDecoration(hintText: 'https://drive.google.com/...')),
+            decoration: const InputDecoration(
+                hintText: 'https://drive.google.com/...')),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel')),
           ElevatedButton(
             onPressed: () async {
               if (ctrl.text.trim().isEmpty) return;
-              await _svc.updateTask(task.taskId, {'fileLink': ctrl.text.trim()});
-              if (ctx.mounted) Navigator.pop(ctx);
+              final newLink = ctrl.text.trim();
+              await _svc.updateTask(task.taskId, {'fileLink': newLink});
+              if (ctx.mounted) {
+                Navigator.pop(ctx);
+                // ── update local list instantly ✅
+                setState(() {
+                  final idx = _tasks.indexWhere(
+                          (t) => t.taskId == task.taskId);
+                  if (idx != -1) {
+                    _tasks[idx] = _tasks[idx].copyWith(
+                      fileLink: newLink,
+                    );
+                  }
+                });
+              }
             },
-            child: const Text('Update', style: TextStyle(color: Colors.white)),
+            child: const Text('Update',
+                style: TextStyle(color: Colors.white)),
           ),
         ],
       ),
@@ -820,10 +933,22 @@ class _TasksScreenState extends State<TasksScreen> {
               Navigator.pop(ctx);
               final user = context.read<AuthProvider>().currentUser!;
               await _svc.reviewTask(task.taskId, action, user.name);
+              setState(() {
+                final idx = _tasks.indexWhere(
+                        (t) => t.taskId == task.taskId);
+                if (idx != -1) {
+                  _tasks[idx] = _tasks[idx].copyWith(
+                    status: action == 'review'
+                        ? 'Reviewed'
+                        : 'Forwarded to Sales',
+                  );
+                }
+              });
               if (context.mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(SnackBar(
                   content: Text(action == 'review'
-                      ? '✅ Task reviewed!' : '📨 Forwarded to sales!'),
+                      ? '✅ Task reviewed!'
+                      : '📨 Forwarded to sales!'),
                   backgroundColor: AppColors.green,
                 ));
               }
@@ -849,9 +974,12 @@ class _TasksScreenState extends State<TasksScreen> {
             onPressed: () async {
               Navigator.pop(ctx);
               await _svc.deleteTask(task.taskId, task.dealId);
+              setState(() =>
+                  _tasks.removeWhere((t) => t.taskId == task.taskId));
               if (context.mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Task deleted'),
+                    const SnackBar(
+                        content: Text('Task deleted'),
                         backgroundColor: AppColors.red));
               }
             },
@@ -1060,6 +1188,8 @@ Widget _commentActionBtn(TaskModel t, void Function(TaskModel) onComment) {
   );
 }
 
+
+// ─── UNCHANGED CLASSES FROM ORIGINAL ────────────────────────────────────────
 // ─── Grouped Task Table ───────────────────────────────────────────────────────
 class _GroupedTaskTable extends StatelessWidget {
   final List<TaskModel>      tasks;
@@ -1382,10 +1512,12 @@ class _EditTaskDialog extends StatefulWidget {
   final TaskModel task;
   final UserModel currentUser;
   final FirestoreService svc;
+  final void Function(TaskModel)? onSaved;
   const _EditTaskDialog({
     required this.task,
     required this.currentUser,
     required this.svc,
+    this.onSaved,
   });
   @override
   State<_EditTaskDialog> createState() => _EditTaskDialogState();
@@ -1478,6 +1610,17 @@ class _EditTaskDialogState extends State<_EditTaskDialog> {
       }
       if (mounted) {
         Navigator.pop(context);
+        widget.onSaved?.call(widget.task.copyWith(
+          subject:        _subjectCtrl.text.trim(),
+          assignmentType: _assignmentType,
+          wordCount:      _wordsCtrl.text.trim(),
+          deadline:       _deadline,
+          priority:       _priority,
+          writerId:       _writerId,
+          writerName:     _writerName,
+          notes:          _notesCtrl.text.trim(),
+          salesTaskId:    _salesTaskCtrl.text.trim(),
+        ));
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
           content: Text('✅ Task updated successfully!'),
           backgroundColor: AppColors.green,

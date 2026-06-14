@@ -1,4 +1,5 @@
 // lib/screens/deals/deals_screen.dart
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -10,6 +11,7 @@ import '../../models/task_model.dart';
 import '../../models/user_model.dart';
 import '../../providers/auth_provider.dart';
 import '../../services/firestore_service.dart';
+import '../../widgets/pagination_bar.dart';
 import '../../widgets/sticky_table.dart';
 import '../../widgets/status_badge.dart';
 
@@ -26,6 +28,7 @@ class _DealsScreenState extends State<DealsScreen> {
   String _searchQuery   = '';
   String _filterMonth   = _currentMonthKey();
   String _filterSalesId = 'all';
+  String _quickDate     = '';
 
   static String _currentMonthKey() {
     final now = DateTime.now();
@@ -35,17 +38,24 @@ class _DealsScreenState extends State<DealsScreen> {
 
   List<UserModel> _salesUsers = [];
 
-  bool              _groupByStatus = true;
+  // Group by Status
+  bool              _groupByStatus = false;
   final Set<String> _collapsed     = {};
 
-  String _quickDate = '';
+  // ── PAGINATION STATE ─────────────────────────────────────────
+  List<DealModel> _deals      = [];
+  bool   _loading             = true;
+  int    _currentPage         = 1;
+  bool   _hasMore             = false;
+  final List<DocumentSnapshot?> _cursorStack = [null];
 
-  Stream<List<DealModel>>? _dealsStream;
+  // Stream for summary bar only
+
   bool _streamInitialized = false;
 
   static const _colsAdmin = [
     TableCol('Task ID',        130),
-    TableCol('Sales ID',       110),   // ← ADD THIS
+    TableCol('Sales ID',       110),
     TableCol('Sales Person',   140),
     TableCol('Date',           100),
     TableCol('Client',         140),
@@ -64,7 +74,7 @@ class _DealsScreenState extends State<DealsScreen> {
 
   static const _colsOther = [
     TableCol('Task ID',        130),
-    TableCol('Sales ID',       110),   // ← ADD THIS
+    TableCol('Sales ID',       110),
     TableCol('Date',           100),
     TableCol('Client',         145),
     TableCol('Words',           80),
@@ -86,8 +96,9 @@ class _DealsScreenState extends State<DealsScreen> {
     if (!_streamInitialized) {
       _streamInitialized = true;
       final user = context.read<AuthProvider>().currentUser!;
-      _dealsStream = _svc.dealsStream(user);
+
       _loadSalesUsers(user);
+      _fetchPage();
     }
   }
 
@@ -112,6 +123,54 @@ class _DealsScreenState extends State<DealsScreen> {
     super.dispose();
   }
 
+  // ── Pagination ────────────────────────────────────────────────
+  Future<void> _fetchPage() async {
+    if (!mounted) return;
+    setState(() => _loading = true);
+
+    final user   = context.read<AuthProvider>().currentUser!;
+    final cursor = _cursorStack[_currentPage - 1];
+
+    // Month filter applied client-side in service — no composite index needed
+    final result = await _svc.getDealsPaginated(
+      user: user,
+      filterMonth: _quickDate.isEmpty ? _filterMonth : '',
+      startAfter: cursor,
+    );
+
+    if (!mounted) return;
+
+    if (_cursorStack.length <= _currentPage) {
+      _cursorStack.add(result.lastDoc);
+    }
+
+    setState(() {
+      _deals   = result.items;
+      _hasMore = result.hasMore;
+      _loading = false;
+    });
+  }
+
+  void _goNextPage() {
+    setState(() => _currentPage++);
+    _fetchPage();
+  }
+
+  void _goPrevPage() {
+    if (_currentPage <= 1) return;
+    setState(() => _currentPage--);
+    _fetchPage();
+  }
+
+  void _resetPagination() {
+    _currentPage = 1;
+    _cursorStack
+      ..clear()
+      ..add(null);
+    _fetchPage();
+  }
+
+  // ── Quick date ────────────────────────────────────────────────
   bool _matchesQuickDate(String dealDate) {
     if (_quickDate.isEmpty) return true;
     final now = DateTime.now();
@@ -138,13 +197,16 @@ class _DealsScreenState extends State<DealsScreen> {
           _quickDate.isNotEmpty          ||
           _searchQuery.isNotEmpty;
 
-  void _clearAllFilters() => setState(() {
-    _filterMonth   = _currentMonthKey();
-    _filterSalesId = 'all';
-    _quickDate     = '';
-    _searchQuery   = '';
-    _searchCtrl.clear();
-  });
+  void _clearAllFilters() {
+    setState(() {
+      _filterMonth   = _currentMonthKey();
+      _filterSalesId = 'all';
+      _quickDate     = '';
+      _searchQuery   = '';
+      _searchCtrl.clear();
+    });
+    _resetPagination();
+  }
 
   String _quickDateLabel(String key) {
     switch (key) {
@@ -155,6 +217,7 @@ class _DealsScreenState extends State<DealsScreen> {
     }
   }
 
+  // Client-side filter (salesId, quickDate, search)
   List<DealModel> _applyFilters(List<DealModel> deals, UserModel user) {
     var filtered = deals;
     if (user.isAdmin && _filterSalesId != 'all') {
@@ -162,8 +225,6 @@ class _DealsScreenState extends State<DealsScreen> {
     }
     if (_quickDate.isNotEmpty) {
       filtered = filtered.where((d) => _matchesQuickDate(d.date)).toList();
-    } else if (_filterMonth.isNotEmpty) {
-      filtered = filtered.where((d) => d.date.startsWith(_filterMonth)).toList();
     }
     if (_searchQuery.isNotEmpty) {
       filtered = filtered.where((d) =>
@@ -199,7 +260,6 @@ class _DealsScreenState extends State<DealsScreen> {
             alignment: WrapAlignment.spaceBetween,
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
-              // Title block
               Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -226,7 +286,6 @@ class _DealsScreenState extends State<DealsScreen> {
                       style: TextStyle(fontSize: 12, color: text2)),
                 ],
               ),
-              // Action buttons
               Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -260,18 +319,14 @@ class _DealsScreenState extends State<DealsScreen> {
           ),
         ),
 
-        // ── ROW 2 — Summary pills (filtered) — matches screenshot style ══
-        StreamBuilder<List<DealModel>>(
-          stream: _dealsStream,
-          builder: (ctx, snap) {
-            if (_dealsStream == null) return const SizedBox.shrink();
-            final all      = snap.data ?? [];
-            final filtered = _applyFilters(all, user);
-            return _DealSummaryBar(deals: filtered, bg: bg, text2: text2);
-          },
+        // ── Summary pills (from stream — always real-time) ══════
+        _DealSummaryBar(
+          deals: _applyFilters(_deals, user),
+          bg: bg,
+          text2: text2,
         ),
 
-        // ── ROW 3 — Search ════════════════════════════════════════
+        // ── Search ════════════════════════════════════════════════
         Container(
           color: bg,
           padding: const EdgeInsets.fromLTRB(20, 4, 20, 6),
@@ -287,7 +342,7 @@ class _DealsScreenState extends State<DealsScreen> {
           ),
         ),
 
-        // ── ROW 4 — Quick date chips + dropdowns ══════════════════
+        // ── Quick date chips + dropdowns ══════════════════════════
         Container(
           color: bg,
           padding: const EdgeInsets.fromLTRB(20, 2, 20, 10),
@@ -305,8 +360,10 @@ class _DealsScreenState extends State<DealsScreen> {
               if (_filterMonth != _currentMonthKey() &&
                   _filterMonth.isNotEmpty)
                 _clearChipBtn('✕ Month',
-                        () => setState(
-                            () => _filterMonth = _currentMonthKey()),
+                        () {
+                      setState(() => _filterMonth = _currentMonthKey());
+                      _resetPagination();
+                    },
                     surface, border, text2),
               if (user.isAdmin && _filterSalesId != 'all')
                 _clearChipBtn('✕ Show All',
@@ -324,7 +381,7 @@ class _DealsScreenState extends State<DealsScreen> {
         // ── Table ────────────────────────────────────────────────
         Expanded(
           child: Container(
-            margin: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+            margin: const EdgeInsets.fromLTRB(20, 0, 20, 0),
             decoration: BoxDecoration(
               color: surface,
               borderRadius: BorderRadius.circular(12),
@@ -334,64 +391,69 @@ class _DealsScreenState extends State<DealsScreen> {
                   blurRadius: 8, offset: const Offset(0, 2))],
             ),
             clipBehavior: Clip.antiAlias,
-            child: StreamBuilder<List<DealModel>>(
-              stream: _dealsStream,
-              builder: (ctx, snap) {
-                if (_dealsStream == null) {
-                  return const Center(
-                      child: CircularProgressIndicator(
-                          color: AppColors.accent));
-                }
-                if (snap.connectionState == ConnectionState.waiting) {
-                  return const Center(
-                      child: CircularProgressIndicator(
-                          color: AppColors.accent));
-                }
+            child: Column(
+              children: [
+                Expanded(child: _buildTable(user, isDark, textColor, text2, surface, border)),
 
-                final all   = snap.data ?? [];
-                final deals = _applyFilters(all, user);
-                final cols  = user.isAdmin ? _colsAdmin : _colsOther;
-
-                if (_groupByStatus) {
-                  return _GroupedDealsTable(
-                    deals:      deals,
-                    cols:       cols,
-                    user:       user,
-                    isDark:     isDark,
-                    collapsed:  _collapsed,
-                    surface:    surface,
-                    border:     border,
-                    textColor:  textColor,
-                    text2:      text2,
-                    salesUsers: _salesUsers,
-                    onToggle:   (s) => setState(() {
-                      _collapsed.contains(s)
-                          ? _collapsed.remove(s)
-                          : _collapsed.add(s);
-                    }),
-                    onEdit:   (d) => _openDealForm(context, user, d),
-                    onDelete: (d) => _confirmDelete(context, d),
-                    onAssign: (d) => _openAssignForm(context, user, d),
-                  );
-                }
-
-                return StickyTable(
-                  columns: cols,
-                  isDark: isDark,
-                  emptyMessage: 'No deals found',
-                  emptySubMessage:
-                  'Click "+ Add Deal" to add your first deal',
-                  emptyIcon: Icons.attach_money,
-                  rows: deals
-                      .map((d) => _buildDealCells(
-                      d, user, isDark, context))
-                      .toList(),
-                );
-              },
+                // ── Pagination bar ────────────────────────────
+                PaginationBar(
+                  currentPage: _currentPage,
+                  hasMore: _hasMore,
+                  isLoading: _loading,
+                  onPrev: _currentPage > 1 ? _goPrevPage : null,
+                  onNext: _goNextPage,
+                ),
+              ],
             ),
           ),
         ),
+
+        const SizedBox(height: 20),
       ],
+    );
+  }
+
+  Widget _buildTable(
+      UserModel user, bool isDark, Color textColor, Color text2,
+      Color surface, Color border) {
+    if (_loading) {
+      return const Center(
+          child: CircularProgressIndicator(color: AppColors.accent));
+    }
+
+    final deals = _applyFilters(_deals, user);
+    final cols  = user.isAdmin ? _colsAdmin : _colsOther;
+
+    if (_groupByStatus) {
+      return _GroupedDealsTable(
+        deals:      deals,
+        cols:       cols,
+        user:       user,
+        isDark:     isDark,
+        collapsed:  _collapsed,
+        surface:    surface,
+        border:     border,
+        textColor:  textColor,
+        text2:      text2,
+        salesUsers: _salesUsers,
+        onToggle:   (s) => setState(() {
+          _collapsed.contains(s)
+              ? _collapsed.remove(s)
+              : _collapsed.add(s);
+        }),
+        onEdit:   (d) => _openDealForm(context, user, d),
+        onDelete: (d) => _confirmDelete(context, d),
+        onAssign: (d) => _openAssignForm(context, user, d),
+      );
+    }
+
+    return StickyTable(
+      columns: cols,
+      isDark: isDark,
+      emptyMessage: 'No deals found',
+      emptySubMessage: 'Click \"+ Add Deal\" to add your first deal',
+      emptyIcon: Icons.attach_money,
+      rows: deals.map((d) => _buildDealCells(d, user, isDark, context)).toList(),
     );
   }
 
@@ -404,7 +466,6 @@ class _DealsScreenState extends State<DealsScreen> {
     cells.add(tCell(
         d.taskCode.isNotEmpty ? d.taskCode : d.id.substring(0, 8),
         color: AppColors.accent, mono: true, fontSize: 11));
-    // ← ADD THIS BLOCK:
     cells.add(tCell(
         d.salesTaskId.isEmpty ? '-' : d.salesTaskId,
         color: AppColors.yellow, mono: true, fontSize: 11));
@@ -451,21 +512,15 @@ class _DealsScreenState extends State<DealsScreen> {
             border: Border.all(color: AppColors.accent.withOpacity(0.3)),
           ),
           padding: const EdgeInsets.all(10),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Flexible(
-                child: Text(
-                  d.notes,
-                  overflow: TextOverflow.ellipsis,
-                  maxLines: 1,
-                  style: TextStyle(fontSize: 12, color: t2c),
-                ),
-              ),
-              const SizedBox(width: 4),
-              Icon(Icons.info_outline, size: 12, color: t2c),
-            ],
-          ),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Flexible(
+              child: Text(d.notes,
+                  overflow: TextOverflow.ellipsis, maxLines: 1,
+                  style: TextStyle(fontSize: 12, color: t2c)),
+            ),
+            const SizedBox(width: 4),
+            Icon(Icons.info_outline, size: 12, color: t2c),
+          ]),
         ),
       ),
       d.salesFileLink.isNotEmpty
@@ -481,9 +536,6 @@ class _DealsScreenState extends State<DealsScreen> {
         if (user.isAdmin)
           tAction('Del', AppColors.red,
                   () => _confirmDelete(context, d)),
-        //    if ((user.isSales || user.isAdmin) && d.assignStatus != 'Assigned')
-        //      tAction('Assign', AppColors.green,
-        //              () => _openAssignForm(context, user, d)),
         if ((user.isSales || user.isAdmin) &&
             d.assignStatus != 'Assigned' &&
             d.writerAssigned.isEmpty)
@@ -517,8 +569,7 @@ class _DealsScreenState extends State<DealsScreen> {
                   : border),
         ),
         child: Row(mainAxisSize: MainAxisSize.min, children: [
-          Icon(icon,
-              size: 14,
+          Icon(icon, size: 14,
               color: active ? AppColors.accent : text2),
           const SizedBox(width: 6),
           Text(label,
@@ -608,13 +659,11 @@ class _DealsScreenState extends State<DealsScreen> {
           },
           borderRadius: BorderRadius.circular(5),
           child: Container(
-            padding:
-            const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
             decoration: BoxDecoration(
               color: AppColors.accent.withOpacity(0.1),
               borderRadius: BorderRadius.circular(5),
-              border:
-              Border.all(color: AppColors.accent.withOpacity(0.3)),
+              border: Border.all(color: AppColors.accent.withOpacity(0.3)),
             ),
             child: Text(label,
                 style: const TextStyle(
@@ -647,7 +696,10 @@ class _DealsScreenState extends State<DealsScreen> {
               child: Text(m,
                   style: TextStyle(fontSize: 12, color: tc))))
               .toList(),
-          onChanged: (v) => setState(() => _filterMonth = v ?? ''),
+          onChanged: (v) {
+            setState(() => _filterMonth = v ?? '');
+            _resetPagination();
+          },
           dropdownColor: surface,
           style: TextStyle(color: tc, fontSize: 12),
           isDense: true,
@@ -696,9 +748,7 @@ class _DealsScreenState extends State<DealsScreen> {
                     ),
                     child: Center(
                       child: Text(
-                        u.name.isNotEmpty
-                            ? u.name[0].toUpperCase()
-                            : 'S',
+                        u.name.isNotEmpty ? u.name[0].toUpperCase() : 'S',
                         style: TextStyle(
                             fontSize: 9,
                             fontWeight: FontWeight.w800,
@@ -736,13 +786,15 @@ class _DealsScreenState extends State<DealsScreen> {
       Color surface, Color border, Color t2) {
     final isActive = _quickDate == key;
     return GestureDetector(
-      onTap: () => setState(() {
-        _quickDate   = isActive ? '' : key;
-        _filterMonth = '';
-      }),
+      onTap: () {
+        setState(() {
+          _quickDate   = isActive ? '' : key;
+          _filterMonth = '';
+        });
+        _resetPagination();
+      },
       child: Container(
-        padding:
-        const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
         decoration: BoxDecoration(
           color: isActive
               ? AppColors.accent.withOpacity(0.12)
@@ -767,8 +819,7 @@ class _DealsScreenState extends State<DealsScreen> {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding:
-        const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
         decoration: BoxDecoration(
             color: bg,
             borderRadius: BorderRadius.circular(6),
@@ -797,43 +848,27 @@ class _DealsScreenState extends State<DealsScreen> {
         contentPadding: const EdgeInsets.symmetric(vertical: 8),
         isDense: true,
       );
-  Widget _notesCell(String notes, Color t2c) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-      child: Tooltip(
-        message: notes,
-        preferBelow: true,
-        textStyle: const TextStyle(fontSize: 12, color: Colors.white),
-        decoration: BoxDecoration(
-          color: const Color(0xFF1E1E2E),
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: AppColors.accent.withOpacity(0.3)),
-        ),
-        padding: const EdgeInsets.all(10),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Flexible(
-              child: Text(
-                notes,
-                overflow: TextOverflow.ellipsis,
-                maxLines: 1,
-                style: TextStyle(fontSize: 12, color: t2c),
-              ),
-            ),
-            const SizedBox(width: 4),
-            Icon(Icons.info_outline, size: 12, color: t2c),
-          ],
-        ),
-      ),
-    );
-  }
+
   void _openDealForm(
       BuildContext context, UserModel user, DealModel? deal) {
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (_) => _DealDialog(deal: deal, user: user, svc: _svc),
+      builder: (_) => _DealDialog(
+        deal: deal,
+        user: user,
+        svc: _svc,
+        onSaved: (savedDeal) {
+          setState(() {
+            if (deal == null) {
+              _deals.insert(0, savedDeal);
+            } else {
+              final idx = _deals.indexWhere((d) => d.id == savedDeal.id);
+              if (idx != -1) _deals[idx] = savedDeal;
+            }
+          });
+        },
+      ),
     );
   }
 
@@ -842,7 +877,17 @@ class _DealsScreenState extends State<DealsScreen> {
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (_) => _AssignDialog(deal: deal, user: user, svc: _svc),
+      builder: (_) => _AssignDialog(
+        deal: deal,
+        user: user,
+        svc: _svc,
+        onAssigned: (updatedDeal) {
+          setState(() {
+            final idx = _deals.indexWhere((d) => d.id == updatedDeal.id);
+            if (idx != -1) _deals[idx] = updatedDeal;
+          });
+        },
+      ),
     );
   }
 
@@ -864,6 +909,7 @@ class _DealsScreenState extends State<DealsScreen> {
             onPressed: () async {
               Navigator.pop(ctx);
               await _svc.deleteDeal(deal.id);
+              setState(() => _deals.removeWhere((d) => d.id == deal.id));
             },
             style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.red),
@@ -875,7 +921,6 @@ class _DealsScreenState extends State<DealsScreen> {
     );
   }
 }
-
 
 // ─── Deal Summary Bar — matches screenshot pill style ─────────────────────────
 class _DealSummaryBar extends StatelessWidget {
@@ -1402,8 +1447,13 @@ class _DealDialog extends StatefulWidget {
   final DealModel? deal;
   final UserModel user;
   final FirestoreService svc;
-  const _DealDialog(
-      {required this.deal, required this.user, required this.svc});
+  final void Function(DealModel)? onSaved;
+  const _DealDialog({
+    required this.deal,
+    required this.user,
+    required this.svc,
+    this.onSaved,
+  });
   @override
   State<_DealDialog> createState() => _DealDialogState();
 }
@@ -1492,7 +1542,39 @@ class _DealDialogState extends State<_DealDialog> {
       //      await widget.svc.updateDeal(widget.deal!.id, deal.toMap());
       //    }
       if (widget.deal == null) {
-        await widget.svc.addDeal(deal);
+        // ADD: get the real doc id back from Firestore
+        final newId = await widget.svc.addDeal(deal);
+        if (mounted) {
+          Navigator.pop(context);
+          // build deal with real id so insert works correctly
+          final savedDeal = DealModel(
+            id:               newId,
+            taskCode:         'TASK-${newId.substring(0, 6).toUpperCase()}',
+            date:             deal.date,
+            salesId:          deal.salesId,
+            salesName:        deal.salesName,
+            team:             deal.team,
+            clientName:       deal.clientName,
+            wordCount:        deal.wordCount,
+            totalDealValue:   deal.totalDealValue,
+            payment1st:       deal.payment1st,
+            payment2nd:       deal.payment2nd,
+            paymentStatus:    deal.paymentStatus,
+            notes:            deal.notes,
+            salesFileLink:    deal.salesFileLink,
+            paymentScreenshot: deal.paymentScreenshot,
+            clientProfileLink: deal.clientProfileLink,
+            whatsappNumber:   deal.whatsappNumber,
+            salesTaskId:      deal.salesTaskId,
+            assignStatus:     'Open',
+            writerAssigned:   '',
+            writerTaskId:     '',
+          );
+          widget.onSaved?.call(savedDeal);
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+              content: Text('✅ Deal added!'),
+              backgroundColor: AppColors.green));
+        }
       } else {
         final updateData = deal.toMap();
         updateData.remove('assignStatus');
@@ -1506,14 +1588,28 @@ class _DealDialogState extends State<_DealDialog> {
           'salesTaskId':   _sid.text.trim(),
           'notes':         _nc.text.trim(),
         });
-      }
-      if (mounted) {
-        Navigator.pop(context);
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text(widget.deal == null
-                ? '✅ Deal added!'
-                : '✅ Deal updated!'),
-            backgroundColor: AppColors.green));
+        if (mounted) {
+          Navigator.pop(context);
+          // EDIT: use existing deal with updated fields
+          final updatedDeal = widget.deal!.copyWith(
+            clientName:       _cc.text.trim(),
+            wordCount:        _wc.text.trim(),
+            totalDealValue:   _tc.text.trim(),
+            payment1st:       _p1.text.trim(),
+            payment2nd:       _p2.text.trim(),
+            paymentStatus:    _payStatus,
+            notes:            _nc.text.trim(),
+            salesFileLink:    _sf.text.trim(),
+            paymentScreenshot: _sc2.text.trim(),
+            clientProfileLink: _pc.text.trim(),
+            whatsappNumber:   _wa.text.trim(),
+            salesTaskId:      _sid.text.trim(),
+          );
+          widget.onSaved?.call(updatedDeal);
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+              content: Text('✅ Deal updated!'),
+              backgroundColor: AppColors.green));
+        }
       }
     } catch (e) {
       setState(() { _saving = false; _error = e.toString(); });
@@ -1717,8 +1813,13 @@ class _AssignDialog extends StatefulWidget {
   final DealModel deal;
   final UserModel user;
   final FirestoreService svc;
-  const _AssignDialog(
-      {required this.deal, required this.user, required this.svc});
+  final void Function(DealModel)? onAssigned;
+  const _AssignDialog({
+    required this.deal,
+    required this.user,
+    required this.svc,
+    this.onAssigned,
+  });
   @override
   State<_AssignDialog> createState() => _AssignDialogState();
 }
@@ -1755,10 +1856,8 @@ class _AssignDialogState extends State<_AssignDialog> {
     if (mounted) {
       setState(() {
         _writers = w;
-        if (w.isNotEmpty) {
-          _wId   = w.first.userId;
-          _wName = w.first.name;
-        }
+        // ← REMOVED: don't auto-select first writer
+        // user must manually select a writer
         _loadingW = false;
       });
     }
@@ -1807,6 +1906,12 @@ class _AssignDialogState extends State<_AssignDialog> {
     await widget.svc.assignTask(task, widget.deal.id);
     if (mounted) {
       Navigator.pop(context);
+      widget.onAssigned?.call(
+        widget.deal.copyWith(
+          assignStatus:   'Assigned',
+          writerAssigned: _wName,
+        ),
+      );
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text('✅ Assigned to $_wName!'),
           backgroundColor: AppColors.green));

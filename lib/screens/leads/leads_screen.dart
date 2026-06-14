@@ -1,4 +1,5 @@
 // lib/screens/leads/leads_screen.dart
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/constants/app_constants.dart';
@@ -8,6 +9,7 @@ import '../../models/lead_model.dart';
 import '../../models/user_model.dart';
 import '../../providers/auth_provider.dart';
 import '../../services/firestore_service.dart';
+import '../../widgets/pagination_bar.dart';
 import '../../widgets/sticky_table.dart';
 import '../../widgets/status_badge.dart';
 
@@ -31,15 +33,29 @@ class _LeadsScreenState extends State<LeadsScreen> {
   String          _filterSalesId = 'all';
   List<UserModel> _salesUsers    = [];
 
-  // Group by status
-  bool            _groupByStatus = true;
+// Group by status
+  bool            _groupByStatus = false;
   final Set<String> _collapsed   = {};
 
   // Density
   _Density _density = _Density.comfortable;
 
-  // ── Stream cache — initialized once in didChangeDependencies ──
-  Stream<List<LeadModel>>? _leadsStream;
+  // ── PAGINATION STATE ─────────────────────────────────────────
+  List<LeadModel> _leads      = [];
+  bool   _loading             = true;
+  int    _currentPage         = 1;
+  bool   _hasMore             = false;
+
+  // Cursor stacks: index 0 = page 1 start (always null), index N = page N+1 start
+  // We store the lastDoc of each page so we can go forward,
+  // and the firstDoc of each page so we can reconstruct "go back".
+  // Simpler approach: keep a stack of startAfter cursors.
+  // cursorStack[0] = null (page 1 has no cursor)
+  // cursorStack[1] = lastDoc of page 1  (start of page 2)
+  final List<DocumentSnapshot?> _cursorStack = [null];
+
+  // Stream for summary bar ONLY (small, always up-to-date)
+//  Stream<List<LeadModel>>? _leadsStream;
   bool _streamInitialized = false;
 
   // ── Column definitions ────────────────────────────────────────
@@ -70,32 +86,28 @@ class _LeadsScreenState extends State<LeadsScreen> {
     TableCol('Actions',     110),
   ];
 
-  /// Returns 'YYYY-MM' for the current month, e.g. '2026-05'.
   static String _currentMonthKey() {
     final now = DateTime.now();
     final m   = now.month.toString().padLeft(2, '0');
     return '${now.year}-$m';
   }
 
-  // ── didChangeDependencies: correct place to read providers ────
-  // Runs after initState AND after widget is fully in the tree.
-  // The _streamInitialized guard prevents re-creating the stream
-  // on subsequent calls (e.g. theme changes re-trigger this).
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     if (!_streamInitialized) {
       _streamInitialized = true;
       final user = context.read<AuthProvider>().currentUser!;
-      _leadsStream = _svc.leadsStream(user);
+      // Stream used ONLY for the summary bar (lightweight, real-time)
+//      _leadsStream = _svc.leadsStream(user);
       _loadSalesUsers(user);
+      _fetchPage(); // load first page
     }
   }
 
   @override
   void initState() {
     super.initState();
-    // intentionally empty — stream init moved to didChangeDependencies
   }
 
   Future<void> _loadSalesUsers(UserModel user) async {
@@ -104,6 +116,56 @@ class _LeadsScreenState extends State<LeadsScreen> {
     if (mounted) {
       setState(() => _salesUsers = all.where((u) => u.isSales).toList());
     }
+  }
+
+  // ── Fetch a page using the cursor at cursorStack[currentPage - 1] ──
+  Future<void> _fetchPage() async {
+    if (!mounted) return;
+    setState(() => _loading = true);
+
+    final user   = context.read<AuthProvider>().currentUser!;
+    final cursor = _cursorStack[_currentPage - 1];
+
+    // Month filter is always applied client-side inside the service
+    // so no composite Firestore indexes are required
+    final result = await _svc.getLeadsPaginated(
+      user: user,
+      filterMonth: _quickDate.isEmpty ? _filterMonth : '',
+      startAfter: cursor,
+    );
+
+    if (!mounted) return;
+
+    // Save the next-page cursor if we don't have it yet
+    if (_cursorStack.length <= _currentPage) {
+      _cursorStack.add(result.lastDoc);
+    }
+
+    setState(() {
+      _leads   = result.items;
+      _hasMore = result.hasMore;
+      _loading = false;
+    });
+  }
+
+  void _goNextPage() {
+    setState(() => _currentPage++);
+    _fetchPage();
+  }
+
+  void _goPrevPage() {
+    if (_currentPage <= 1) return;
+    setState(() => _currentPage--);
+    _fetchPage();
+  }
+
+  // When filters change we reset to page 1
+  void _resetPagination() {
+    _currentPage = 1;
+    _cursorStack
+      ..clear()
+      ..add(null);
+    _fetchPage();
   }
 
   @override
@@ -149,17 +211,22 @@ class _LeadsScreenState extends State<LeadsScreen> {
           _filterSalesId != 'all'  ||
           _searchQuery.isNotEmpty;
 
-  void _clearAllFilters() => setState(() {
-    _filterMonth   = _currentMonthKey();
-    _filterStatus  = '';
-    _filterSource  = '';
-    _quickDate     = '';
-    _filterSalesId = 'all';
-    _searchQuery   = '';
-    _searchCtrl.clear();
-  });
+  void _clearAllFilters() {
+    setState(() {
+      _filterMonth   = _currentMonthKey();
+      _filterStatus  = '';
+      _filterSource  = '';
+      _quickDate     = '';
+      _filterSalesId = 'all';
+      _searchQuery   = '';
+      _searchCtrl.clear();
+    });
+    _resetPagination();
+  }
 
-  // ── Apply all filters ─────────────────────────────────────────
+  // ── Apply CLIENT-SIDE filters (status, source, salesId, search, quickDate) ──
+  // Month filter is already applied by Firestore — we don't repeat it here
+  // unless quickDate is active (in which case month was not sent to Firestore).
   List<LeadModel> _applyFilters(List<LeadModel> leads, UserModel user) {
     var filtered = leads;
 
@@ -167,10 +234,9 @@ class _LeadsScreenState extends State<LeadsScreen> {
       filtered = filtered.where((l) => l.salesId == _filterSalesId).toList();
     }
 
+    // quickDate is always client-side
     if (_quickDate.isNotEmpty) {
       filtered = filtered.where((l) => _matchesQuickDate(l.date)).toList();
-    } else if (_filterMonth.isNotEmpty) {
-      filtered = filtered.where((l) => l.date.startsWith(_filterMonth)).toList();
     }
 
     if (_filterStatus.isNotEmpty) {
@@ -221,8 +287,8 @@ class _LeadsScreenState extends State<LeadsScreen> {
                   : _buildHeaderDesktop(context, user, bg, surface, border, textColor, text2),
             ),
 
-            // ══ ROW 2 — Summary pills (FILTERED) ══════════════════
-            StreamBuilder<List<LeadModel>>(
+            // ══ ROW 2 — Summary pills (from stream — always up to date) ══
+    /**        StreamBuilder<List<LeadModel>>(
               stream: _leadsStream,
               builder: (ctx, snap) {
                 if (_leadsStream == null) return const SizedBox.shrink();
@@ -230,6 +296,11 @@ class _LeadsScreenState extends State<LeadsScreen> {
                 final filtered = _applyFilters(all, user);
                 return _SummaryBar(leads: filtered, bg: bg, text2: text2);
               },
+            ),*/
+            _SummaryBar(
+              leads: _applyFilters(_leads, user),
+              bg: bg,
+              text2: text2,
             ),
 
             // ══ ROW 3 — Search ════════════════════════════════════
@@ -260,7 +331,7 @@ class _LeadsScreenState extends State<LeadsScreen> {
             // ══ TABLE ═════════════════════════════════════════════
             Expanded(
               child: Container(
-                margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                margin: const EdgeInsets.fromLTRB(16, 0, 16, 0),
                 decoration: BoxDecoration(
                   color: surface,
                   borderRadius: BorderRadius.circular(12),
@@ -271,73 +342,82 @@ class _LeadsScreenState extends State<LeadsScreen> {
                       offset: const Offset(0, 2))],
                 ),
                 clipBehavior: Clip.antiAlias,
-                child: StreamBuilder<List<LeadModel>>(
-                  stream: _leadsStream,
-                  builder: (ctx, snap) {
-                    // Stream not yet initialized
-                    if (_leadsStream == null) {
-                      return const Center(
-                          child: CircularProgressIndicator(
-                              color: AppColors.accent));
-                    }
-                    if (snap.connectionState == ConnectionState.waiting) {
-                      return const Center(
-                          child: CircularProgressIndicator(
-                              color: AppColors.accent));
-                    }
+                child: Column(
+                  children: [
+                    Expanded(child: _buildTable(user, isDark, textColor, text2)),
 
-                    final all   = snap.data ?? [];
-                    final leads = _applyFilters(all, user);
-                    final cols  = user.isAdmin ? _cols : _colsNoSales;
-                    final rowPad = _rowPadding(_density);
-
-                    // ── Group by status ───────────────────────────
-                    if (_groupByStatus) {
-                      return _GroupedTable(
-                        leads:       leads,
-                        cols:        cols,
-                        user:        user,
-                        isDark:      isDark,
-                        rowPad:      rowPad,
-                        collapsed:   _collapsed,
-                        surface:     surface,
-                        border:      border,
-                        textColor:   textColor,
-                        text2:       text2,
-                        onToggle:    (s) => setState(() {
-                          _collapsed.contains(s)
-                              ? _collapsed.remove(s)
-                              : _collapsed.add(s);
-                        }),
-                        onEdit:      (l) => _openForm(context, user, l),
-                        onDelete:    (l) => _confirmDelete(context, l),
-                        emptySubMsg: _hasActiveFilters
-                            ? 'Try clearing some filters'
-                            : 'Click "+ Add Lead" to add your first lead',
-                      );
-                    }
-
-                    // ── Flat table ────────────────────────────────
-                    return StickyTable(
-                      columns:        cols,
-                      isDark:         isDark,
-                      pinnedCount:    3,
-                      emptyMessage:   'No leads found',
-                      emptySubMessage: _hasActiveFilters
-                          ? 'Try clearing some filters'
-                          : 'Click "+ Add Lead" to add your first lead',
-                      emptyIcon:      Icons.inbox_outlined,
-                      rows: _buildRows(
-                          leads, user, cols, isDark, rowPad,
-                          textColor, text2, context),
-                    );
-                  },
+                    // ── Pagination bar ────────────────────────────
+                    PaginationBar(
+                      currentPage: _currentPage,
+                      hasMore: _hasMore,
+                      isLoading: _loading,
+                      onPrev: _currentPage > 1 ? _goPrevPage : null,
+                      onNext: _goNextPage,
+                    ),
+                  ],
                 ),
               ),
             ),
+
+            const SizedBox(height: 16),
           ],
         );
       },
+    );
+  }
+
+  Widget _buildTable(
+      UserModel user, bool isDark, Color textColor, Color text2) {
+    if (_loading) {
+      return const Center(
+          child: CircularProgressIndicator(color: AppColors.accent));
+    }
+
+    final leads = _applyFilters(_leads, user);
+    final cols  = user.isAdmin ? _cols : _colsNoSales;
+    final rowPad = _rowPadding(_density);
+
+    // ── Group by status ───────────────────────────────────────
+    if (_groupByStatus) {
+      return _GroupedTable(
+        leads:       leads,
+        cols:        cols,
+        user:        user,
+        isDark:      isDark,
+        rowPad:      rowPad,
+        collapsed:   _collapsed,
+        surface:     Theme.of(context).brightness == Brightness.dark
+            ? AppColors.darkSurface : AppColors.lightSurface,
+        border:      Theme.of(context).brightness == Brightness.dark
+            ? AppColors.darkBorder : AppColors.lightBorder,
+        textColor:   textColor,
+        text2:       text2,
+        onToggle:    (s) => setState(() {
+          _collapsed.contains(s)
+              ? _collapsed.remove(s)
+              : _collapsed.add(s);
+        }),
+        onEdit:      (l) => _openForm(context, user, l),
+        onDelete:    (l) => _confirmDelete(context, l),
+        emptySubMsg: _hasActiveFilters
+            ? 'Try clearing some filters'
+            : 'Click \"+ Add Lead\" to add your first lead',
+      );
+    }
+
+    // ── Flat table ────────────────────────────────────────────
+    return StickyTable(
+      columns:        cols,
+      isDark:         isDark,
+      pinnedCount:    3,
+      emptyMessage:   'No leads found',
+      emptySubMessage: _hasActiveFilters
+          ? 'Try clearing some filters'
+          : 'Click \"+ Add Lead\" to add your first lead',
+      emptyIcon:      Icons.inbox_outlined,
+      rows: _buildRows(
+          leads, user, cols, isDark, rowPad,
+          textColor, text2, context),
     );
   }
 
@@ -603,10 +683,12 @@ class _LeadsScreenState extends State<LeadsScreen> {
       Color text2,
       BuildContext context,
       ) {
+    // Row numbers are relative to page: page 1 starts at 1, page 2 at 101, etc.
+    final offset = (_currentPage - 1) * 100;
     return leads.asMap().entries.map((e) {
       final i = e.key;
       final l = e.value;
-      return _rowCells(i + 1, l, user, rowPad, textColor, text2, context);
+      return _rowCells(offset + i + 1, l, user, rowPad, textColor, text2, context);
     }).toList();
   }
 
@@ -700,10 +782,13 @@ class _LeadsScreenState extends State<LeadsScreen> {
       Color surface, Color border, Color t2) {
     final isActive = _quickDate == key;
     return GestureDetector(
-      onTap: () => setState(() {
-        _quickDate   = isActive ? '' : key;
-        _filterMonth = '';
-      }),
+      onTap: () {
+        setState(() {
+          _quickDate   = isActive ? '' : key;
+          _filterMonth = '';
+        });
+        _resetPagination();
+      },
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
         decoration: BoxDecoration(
@@ -743,10 +828,13 @@ class _LeadsScreenState extends State<LeadsScreen> {
             child: Text(m,
                 style: TextStyle(fontSize: 12, color: tc))))
             .toList(),
-        onChanged: (v) => setState(() {
-          _filterMonth = v ?? '';
-          _quickDate   = '';
-        }),
+        onChanged: (v) {
+          setState(() {
+            _filterMonth = v ?? '';
+            _quickDate   = '';
+          });
+          _resetPagination();
+        },
         dropdownColor: surface,
         style: TextStyle(color: tc, fontSize: 12),
         isDense: true,
@@ -860,7 +948,10 @@ class _LeadsScreenState extends State<LeadsScreen> {
             ]),
           )),
         ],
-        onChanged: (v) => setState(() => _filterSalesId = v ?? 'all'),
+        onChanged: (v) {
+          setState(() => _filterSalesId = v ?? 'all');
+          // salesId filter is client-side, no need to reset pagination
+        },
         dropdownColor: surface,
         style: TextStyle(color: tc, fontSize: 12),
         isDense: true,
@@ -986,6 +1077,7 @@ class _LeadsScreenState extends State<LeadsScreen> {
       ]),
     );
   }
+
   Widget _remarksCell(String remarks, Color t2c) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
@@ -1060,7 +1152,21 @@ class _LeadsScreenState extends State<LeadsScreen> {
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (_) => _LeadDialog(lead: lead, user: user, svc: _svc),
+      builder: (_) => _LeadDialog(
+        lead: lead,
+        user: user,
+        svc: _svc,
+        onSaved: (savedLead) {
+          setState(() {
+            if (lead == null) {
+              _leads.insert(0, savedLead);
+            } else {
+              final idx = _leads.indexWhere((l) => l.id == savedLead.id);
+              if (idx != -1) _leads[idx] = savedLead;
+            }
+          });
+        },
+      ),
     );
   }
 
@@ -1081,6 +1187,7 @@ class _LeadsScreenState extends State<LeadsScreen> {
             onPressed: () async {
               Navigator.pop(ctx);
               await _svc.deleteLead(lead.id);
+              setState(() => _leads.removeWhere((l) => l.id == lead.id));
               if (context.mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
@@ -1170,6 +1277,7 @@ class _PillData {
 }
 
 // ─── Grouped Table ────────────────────────────────────────────────────────────
+// (identical to original — no changes)
 class _GroupedTable extends StatelessWidget {
   final List<LeadModel>  leads;
   final List<TableCol>   cols;
@@ -1386,6 +1494,7 @@ class _GroupedTable extends StatelessWidget {
     ]));
     return cells;
   }
+
   Widget _remarksCell(String remarks, Color t2c) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
@@ -1417,6 +1526,7 @@ class _GroupedTable extends StatelessWidget {
       ),
     );
   }
+
   Widget _salesNameCell(String name) {
     final initials = name
         .split(' ')
@@ -1466,13 +1576,18 @@ class _GroupedTable extends StatelessWidget {
   }
 }
 
-// ─── Lead Form Dialog ──────────────────────────────────────────────────────────
+// ─── Lead Form Dialog (unchanged from original) ────────────────────────────────
 class _LeadDialog extends StatefulWidget {
   final LeadModel?       lead;
   final UserModel        user;
   final FirestoreService svc;
-  const _LeadDialog(
-      {required this.lead, required this.user, required this.svc});
+  final void Function(LeadModel)? onSaved;
+  const _LeadDialog({
+    required this.lead,
+    required this.user,
+    required this.svc,
+    this.onSaved,
+  });
   @override
   State<_LeadDialog> createState() => _LeadDialogState();
 }
@@ -1527,12 +1642,9 @@ class _LeadDialogState extends State<_LeadDialog> {
       final l = LeadModel(
           id:                widget.lead?.id ?? '',
           date:              _date,
-          //  salesId:           widget.user.userId,
-          //   salesName:         widget.user.name,
-          //   team:              widget.user.team,
-          salesId:           widget.lead?.salesId   ?? widget.user.userId, //new add replace
-          salesName:         widget.lead?.salesName ?? widget.user.name, //new add replace
-          team:              widget.lead?.team      ?? widget.user.team,  //new add replace
+          salesId:           widget.lead?.salesId   ?? widget.user.userId,
+          salesName:         widget.lead?.salesName ?? widget.user.name,
+          team:              widget.lead?.team      ?? widget.user.team,
           clientName:        _cc.text.trim(),
           dealClosingStatus: _status,
           subjectsTask:      _sc.text.trim(),
@@ -1543,16 +1655,50 @@ class _LeadDialogState extends State<_LeadDialog> {
           whatsappNumber:    _wc.text.trim());
 
       if (widget.lead == null) {
-        await widget.svc.addLead(l);
+        // ADD: get real doc id back
+        final newId = await widget.svc.addLead(l);
+        if (mounted) {
+          Navigator.pop(context);
+          final savedLead = LeadModel(
+            id:                newId,
+            date:              l.date,
+            salesId:           l.salesId,
+            salesName:         l.salesName,
+            team:              l.team,
+            clientName:        l.clientName,
+            dealClosingStatus: l.dealClosingStatus,
+            subjectsTask:      l.subjectsTask,
+            source:            l.source,
+            remarks:           l.remarks,
+            clientProfileLink: l.clientProfileLink,
+            followupTextCall:  l.followupTextCall,
+            whatsappNumber:    l.whatsappNumber,
+          );
+          widget.onSaved?.call(savedLead);
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+              content: Text('✅ Lead added!'),
+              backgroundColor: AppColors.green));
+        }
       } else {
         await widget.svc.updateLead(widget.lead!.id, l.toMap());
-      }
-      if (mounted) {
-        Navigator.pop(context);
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text(widget.lead == null
-                ? '✅ Lead added!' : '✅ Lead updated!'),
-            backgroundColor: AppColors.green));
+        if (mounted) {
+          Navigator.pop(context);
+          // EDIT: use existing id with updated fields
+          final updatedLead = widget.lead!.copyWith(
+            clientName:        _cc.text.trim(),
+            dealClosingStatus: _status,
+            subjectsTask:      _sc.text.trim(),
+            source:            _source,
+            remarks:           _rc.text.trim(),
+            clientProfileLink: _pc.text.trim(),
+            followupTextCall:  _fc.text.trim(),
+            whatsappNumber:    _wc.text.trim(),
+          );
+          widget.onSaved?.call(updatedLead);
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+              content: Text('✅ Lead updated!'),
+              backgroundColor: AppColors.green));
+        }
       }
     } catch (e) {
       setState(() { _saving = false; _error = e.toString(); });
